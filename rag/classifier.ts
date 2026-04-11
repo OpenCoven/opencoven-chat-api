@@ -44,11 +44,11 @@ const COMPARISON_PATTERNS = [
 
 // Domain-specific synonyms for query expansion
 const SYNONYMS: Record<string, string[]> = {
-  "auth": ["authentication", "login", "sign in", "credentials"],
+  "auth": ["authentication", "login", "sign in", "signup", "credentials"],
   "config": ["configuration", "settings", "options", "setup"],
   "api": ["endpoint", "route", "interface"],
   "db": ["database", "storage", "data"],
-  "env": ["environment", "variables", "secrets"],
+  "env": ["environment", "variables", "secrets", "private", "keys"],
   "deploy": ["deployment", "hosting", "publish"],
   "err": ["error", "exception", "failure"],
 };
