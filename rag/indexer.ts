@@ -1,6 +1,6 @@
 /**
- * Documentation Indexer for OpenClaw docs.
- * Fetches documentation from docs.openclaw.ai/llms-full.txt,
+ * Documentation Indexer for OpenCoven docs.
+ * Fetches documentation from docs.opencoven.ai/llms-full.txt,
  * chunks it, generates embeddings, and stores in Upstash Vector.
  * Also builds BM25 inverted index for keyword search.
  */
@@ -46,7 +46,7 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-const DOCS_BASE_URL = "https://docs.openclaw.ai";
+const DOCS_BASE_URL = "https://docs.opencoven.ai";
 const LLMS_FULL_URL = `${DOCS_BASE_URL}/llms-full.txt`;
 const SUPPLEMENTARY_DIR = join(process.cwd(), "docs");
 
@@ -85,7 +85,7 @@ async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
   // Split by top-level headers (# title)
   // The format is:
   // # Title
-  // Source: https://docs.openclaw.ai/path
+  // Source: https://docs.opencoven.ai/path
   // 
   // Content...
   const sections = content.split(/\n(?=# [^\n]+\nSource:)/);

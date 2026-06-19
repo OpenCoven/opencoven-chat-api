@@ -1,6 +1,6 @@
 /**
  * GitHub Webhook Handler for docs updates.
- * Triggers re-indexing when docs.openclaw.ai main branch is updated.
+ * Triggers re-indexing when the OpenCoven docs main branch is updated.
  * 
  * Setup:
  * 1. Add GITHUB_WEBHOOK_SECRET to environment variables

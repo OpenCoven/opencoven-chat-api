@@ -1,15 +1,15 @@
 {
-  "name": "openclaw-chat-api",
+  "name": "opencoven-chat-api",
   "version": "1.0.0",
   "private": true,
-  "description": "RAG-based docs chat API for OpenClaw documentation",
+  "description": "RAG-based Salem docs assistant API for OpenCoven documentation",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/OpenKnot/openclaw-chat-api.git"
+    "url": "https://github.com/OpenCoven/opencoven-chat-api.git"
   },
   "bugs": {
-    "url": "https://github.com/OpenKnot/openclaw-chat-api/issues"
+    "url": "https://github.com/OpenCoven/opencoven-chat-api/issues"
   },
   "scripts": {
     "bdev": "next build && next dev",
@@ -17,6 +17,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "node scripts/validate-opencoven-port.mjs",
     "build:index": "bun scripts/build-vector-index.ts",
     "deploy": "vercel"
   },
@@ -26,7 +27,6 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@upstash/vector": "^1.2.3",
-    "@vercel/analytics": "^1.6.1",
     "next": "16.2.5",
     "openai": "^6.32.0",
     "react": "^19.2.4",

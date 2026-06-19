@@ -31,7 +31,7 @@ function getRatelimit(): Ratelimit | null {
     redis,
     limiter: Ratelimit.slidingWindow(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW),
     analytics: true,
-    prefix: "openclaw-chat",
+    prefix: "opencoven-chat",
   });
 
   return ratelimit;
