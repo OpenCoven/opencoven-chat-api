@@ -13,6 +13,7 @@ const chatForm = read("app/components/chat-form.tsx");
 const chatRoute = read("app/api/chat/route.ts");
 const indexer = read("rag/indexer.ts");
 const envExample = read(".env.example");
+const logo = read("public/logo.svg");
 
 assert.equal(packageJson.name, "opencoven-chat-api");
 assert.equal(
@@ -60,5 +61,36 @@ assert.ok(!chatForm.includes("diagnostics"));
 assert.ok(chatRoute.includes("You are Salem"));
 assert.ok(indexer.includes("https://docs.opencoven.ai"));
 assert.ok(!envExample.includes("ENABLE_OBSERVABILITY"));
+
+// Salem agent must be configured as OpenCoven's empowered local familiar.
+assert.ok(
+  chatRoute.includes("OpenCoven's local familiar"),
+  "chatRoute should frame Salem as OpenCoven's local familiar",
+);
+assert.ok(
+  chatRoute.includes("IDENTITY:"),
+  "chatRoute system prompt should include an IDENTITY section to keep Salem in character",
+);
+
+// All runtime requirements must be wired in the example env.
+for (const requiredEnv of [
+  "UPSTASH_VECTOR_REST_URL",
+  "UPSTASH_VECTOR_REST_TOKEN",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "GEMINI_API_KEY",
+  "OPENAI_API_KEY",
+]) {
+  assert.ok(
+    envExample.includes(requiredEnv),
+    `.env.example should document the required ${requiredEnv}`,
+  );
+}
+
+// Logo must be the OpenCoven mark, not the old OpenClaw pixel lobster.
+assert.ok(
+  !/lobster|claw/i.test(logo),
+  "public/logo.svg should not contain the old OpenClaw lobster branding",
+);
 
 console.log("validate-opencoven-port: ok");
