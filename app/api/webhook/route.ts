@@ -8,7 +8,8 @@
  * 3. Select "push" events and set content type to application/json
  */
 import { NextRequest, NextResponse } from "next/server";
-import { indexDocs, verifyGitHubSignature, isMainBranchPush } from "@/rag/indexer";
+import { verifyGitHubSignature, isMainBranchPush } from "@/rag/indexer";
+import { reindexDocsIfChanged } from "@/rag/reindex-freshness";
 
 export const runtime = "nodejs";
 
@@ -113,30 +114,48 @@ export async function POST(request: NextRequest) {
   indexingStatus.isIndexing = true;
 
   try {
-    const result = await indexDocs();
+    const reindex = await reindexDocsIfChanged({
+      trigger: "github:webhook",
+    });
 
     indexingStatus.lastIndexed = new Date();
-    indexingStatus.lastResult = result;
+    indexingStatus.lastResult = reindex.result;
     indexingStatus.isIndexing = false;
 
-    if (result.success) {
-      console.log(`Indexing complete: ${result.chunksCreated} chunks from ${result.pagesProcessed} pages`);
+    if (reindex.status === "skipped") {
+      console.log("Indexing skipped: docs hash unchanged");
+      return NextResponse.json({
+        status: "skipped",
+        message: "Published documentation is unchanged",
+        reason: reindex.reason,
+        docsHash: reindex.docsHash,
+        stateStorage: reindex.stateStorage,
+      });
+    }
+
+    if (reindex.result?.success) {
+      console.log(
+        `Indexing complete: ${reindex.result.chunksCreated} chunks from ${reindex.result.pagesProcessed} pages`,
+      );
       return NextResponse.json({
         status: "success",
         message: "Documentation re-indexed successfully",
+        reason: reindex.reason,
+        docsHash: reindex.docsHash,
+        stateStorage: reindex.stateStorage,
         result: {
-          pagesProcessed: result.pagesProcessed,
-          chunksCreated: result.chunksCreated,
-          duration: result.duration,
+          pagesProcessed: reindex.result.pagesProcessed,
+          chunksCreated: reindex.result.chunksCreated,
+          duration: reindex.result.duration,
         },
       });
     } else {
-      console.error("Indexing failed:", result.errors);
+      console.error("Indexing failed:", reindex.errors);
       return NextResponse.json(
         {
           status: "error",
           message: "Indexing failed",
-          errors: result.errors,
+          errors: reindex.errors,
         },
         { status: 500 }
       );
