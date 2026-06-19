@@ -61,4 +61,29 @@ assert.ok(chatRoute.includes("You are Salem"));
 assert.ok(indexer.includes("https://docs.opencoven.ai"));
 assert.ok(!envExample.includes("ENABLE_OBSERVABILITY"));
 
+// Salem agent must be configured as OpenCoven's empowered local familiar.
+assert.ok(
+  chatRoute.includes("OpenCoven's local familiar"),
+  "chatRoute should frame Salem as OpenCoven's local familiar",
+);
+assert.ok(
+  chatRoute.includes("IDENTITY:"),
+  "chatRoute system prompt should include an IDENTITY section to keep Salem in character",
+);
+
+// All runtime requirements must be wired in the example env.
+for (const requiredEnv of [
+  "UPSTASH_VECTOR_REST_URL",
+  "UPSTASH_VECTOR_REST_TOKEN",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "GEMINI_API_KEY",
+  "OPENAI_API_KEY",
+]) {
+  assert.ok(
+    envExample.includes(requiredEnv),
+    `.env.example should document the required ${requiredEnv}`,
+  );
+}
+
 console.log("validate-opencoven-port: ok");
