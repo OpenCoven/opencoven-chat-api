@@ -13,6 +13,7 @@ const chatForm = read("app/components/chat-form.tsx");
 const chatRoute = read("app/api/chat/route.ts");
 const indexer = read("rag/indexer.ts");
 const envExample = read(".env.example");
+const logo = read("public/logo.svg");
 
 assert.equal(packageJson.name, "opencoven-chat-api");
 assert.equal(
@@ -85,5 +86,11 @@ for (const requiredEnv of [
     `.env.example should document the required ${requiredEnv}`,
   );
 }
+
+// Logo must be the OpenCoven mark, not the old OpenClaw pixel lobster.
+assert.ok(
+  !/lobster|claw/i.test(logo),
+  "public/logo.svg should not contain the old OpenClaw lobster branding",
+);
 
 console.log("validate-opencoven-port: ok");
