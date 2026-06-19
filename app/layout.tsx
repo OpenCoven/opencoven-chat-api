@@ -7,7 +7,11 @@ export const metadata: Metadata = {
   title: "Salem | OpenCoven Documentation Assistant",
   description: "RAG-based documentation assistant for OpenCoven",
   icons: {
-    icon: "/logo.svg",
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: { url: "/apple-icon.png", sizes: "180x180" },
   },
   openGraph: {
     images: [`${baseUrl}/og-image.png`],
