@@ -1,10 +1,10 @@
-# OpenClaw Docs Agent API
+# OpenCoven Docs Agent API
 
-![OpenClaw Docs Agent](public/og-image.png)
+![OpenCoven Docs Agent](public/og-image.png)
 
-AI-powered documentation chatbot API for [OpenClaw](https://openclaw.ai), built by [OpenKnot](https://openknot.ai).
+AI-powered documentation chatbot API for [OpenCoven](https://opencoven.ai).
 
-This powers the embedded docs agent that helps users navigate and understand OpenClaw's documentation through natural conversation.
+This powers the embedded docs agent that helps users navigate and understand OpenCoven's documentation through natural conversation.
 
 ## Overview
 
