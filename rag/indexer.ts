@@ -278,21 +278,20 @@ export async function indexDocs(): Promise<IndexResult> {
   console.log("Starting documentation indexing...");
 
   // Validate environment
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY && !process.env.GEMINI_API_KEY) {
     return {
       success: false,
       pagesProcessed: 0,
       chunksCreated: 0,
       uniqueTerms: 0,
-      errors: ["GEMINI_API_KEY is required"],
+      errors: ["OPENAI_API_KEY or GEMINI_API_KEY is required"],
       duration: Date.now() - startTime,
     };
   }
 
   try {
     // Initialize components
-    const embeddings = new Embeddings(apiKey);
+    const embeddings = Embeddings.fromEnv();
     const store = new DocsStore();
 
     // Fetch documentation from llms-full.txt

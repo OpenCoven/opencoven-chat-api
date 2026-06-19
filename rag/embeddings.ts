@@ -1,18 +1,27 @@
 /**
- * Gemini Embeddings wrapper for docs-chat RAG pipeline.
+ * Embeddings wrapper for docs-chat RAG pipeline.
  * Provides single and batch embedding generation.
  *
- * Switched from OpenAI text-embedding-3-large to Gemini gemini-embedding-001
- * to eliminate dependency on the frequently-revoked OPENAI_API_KEY.
- * The production memory-search layer already uses Gemini successfully.
- *
- * Gemini gemini-embedding-001 produces 3072-dimensional vectors —
- * identical dimensionality to OpenAI text-embedding-3-large, so
- * the Upstash Vector index schema is unchanged.
+ * OpenAI text-embedding-3-large and Gemini gemini-embedding-001 both produce
+ * 3072-dimensional vectors, so either provider fits the same Upstash Vector
+ * schema. Salem chooses one provider deterministically so indexed docs and
+ * query embeddings stay in the same embedding space.
  */
 
-const DEFAULT_MODEL = "gemini-embedding-001";
+type EmbeddingsProvider = "openai" | "gemini";
+
+interface EmbeddingsOptions {
+  openaiApiKey?: string;
+  geminiApiKey?: string;
+  provider?: "auto" | EmbeddingsProvider;
+  openaiModel?: string;
+  geminiModel?: string;
+}
+
+const DEFAULT_OPENAI_MODEL = "text-embedding-3-large";
+const DEFAULT_GEMINI_MODEL = "gemini-embedding-001";
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
+  "text-embedding-3-large": 3072,
   "gemini-embedding-001": 3072,
   "text-embedding-004": 768,
 };
@@ -26,29 +35,66 @@ const BATCH_DELAY_MS = 35_000; // 35s between batches (~80 req/min, safely under
 
 const GEMINI_EMBED_BASE =
   "https://generativelanguage.googleapis.com/v1beta/models";
+const OPENAI_EMBED_URL = "https://api.openai.com/v1/embeddings";
 
 export class Embeddings {
   private apiKey: string;
   private model: string;
+  public readonly provider: EmbeddingsProvider;
   public readonly dimensions: number;
 
-  constructor(apiKey: string, model: string = DEFAULT_MODEL) {
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY is required for embeddings");
+  constructor(options: EmbeddingsOptions | string, model = DEFAULT_GEMINI_MODEL) {
+    const resolved =
+      typeof options === "string"
+        ? {
+            provider: "gemini" as const,
+            apiKey: options,
+            model,
+          }
+        : resolveEmbeddingProvider(options);
+
+    if (!resolved.apiKey) {
+      throw new Error(
+        resolved.provider === "openai"
+          ? "OPENAI_API_KEY is required for OpenAI embeddings"
+          : "GEMINI_API_KEY is required for Gemini embeddings"
+      );
     }
-    const dims = EMBEDDING_DIMENSIONS[model];
+
+    const dims = EMBEDDING_DIMENSIONS[resolved.model];
     if (!dims) {
-      throw new Error(`Unsupported embedding model: ${model}`);
+      throw new Error(`Unsupported embedding model: ${resolved.model}`);
     }
-    this.apiKey = apiKey;
-    this.model = model;
+
+    this.provider = resolved.provider;
+    this.apiKey = resolved.apiKey;
+    this.model = resolved.model;
     this.dimensions = dims;
+  }
+
+  static fromEnv(): Embeddings {
+    const configuredProvider = process.env.EMBEDDINGS_PROVIDER;
+    const provider =
+      configuredProvider === "openai" || configuredProvider === "gemini"
+        ? configuredProvider
+        : "auto";
+
+    return new Embeddings({
+      provider,
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      geminiApiKey: process.env.GEMINI_API_KEY,
+    });
   }
 
   /**
    * Generate embedding for a single text.
    */
   async embed(text: string): Promise<number[]> {
+    if (this.provider === "openai") {
+      const [embedding] = await this.embedOpenAI([text]);
+      return embedding;
+    }
+
     const url = `${GEMINI_EMBED_BASE}/${this.model}:embedContent?key=${this.apiKey}`;
     const response = await fetch(url, {
       method: "POST",
@@ -75,6 +121,10 @@ export class Embeddings {
   async embedBatch(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) {
       return [];
+    }
+
+    if (this.provider === "openai") {
+      return this.embedOpenAI(texts);
     }
 
     const results: number[][] = [];
@@ -115,4 +165,71 @@ export class Embeddings {
 
     return results;
   }
+
+  private async embedOpenAI(texts: string[]): Promise<number[][]> {
+    const response = await fetch(OPENAI_EMBED_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        input: texts,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`OpenAI embed failed (${response.status}): ${err}`);
+    }
+
+    const data = (await response.json()) as {
+      data: Array<{ index: number; embedding: number[] }>;
+    };
+
+    return data.data
+      .sort((a, b) => a.index - b.index)
+      .map((entry) => entry.embedding);
+  }
+}
+
+function resolveEmbeddingProvider(options: EmbeddingsOptions): {
+  provider: EmbeddingsProvider;
+  apiKey?: string;
+  model: string;
+} {
+  if (options.provider === "openai") {
+    return {
+      provider: "openai",
+      apiKey: options.openaiApiKey,
+      model: options.openaiModel ?? DEFAULT_OPENAI_MODEL,
+    };
+  }
+
+  if (options.provider === "gemini") {
+    return {
+      provider: "gemini",
+      apiKey: options.geminiApiKey,
+      model: options.geminiModel ?? DEFAULT_GEMINI_MODEL,
+    };
+  }
+
+  if (options.openaiApiKey) {
+    return {
+      provider: "openai",
+      apiKey: options.openaiApiKey,
+      model: options.openaiModel ?? DEFAULT_OPENAI_MODEL,
+    };
+  }
+
+  if (options.geminiApiKey) {
+    return {
+      provider: "gemini",
+      apiKey: options.geminiApiKey,
+      model: options.geminiModel ?? DEFAULT_GEMINI_MODEL,
+    };
+  }
+
+  throw new Error("OPENAI_API_KEY or GEMINI_API_KEY is required for embeddings");
 }

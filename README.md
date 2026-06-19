@@ -81,8 +81,9 @@ cp .env.example .env
 
 | Variable                    | Required | Description                                      |
 | --------------------------- | -------- | ------------------------------------------------ |
-| `GEMINI_API_KEY`            | Yes      | Gemini API key for embeddings                    |
-| `OPENAI_API_KEY`            | Yes      | OpenAI API key for streaming chat completions    |
+| `OPENAI_API_KEY`            | Yes      | OpenAI key for streaming chat completions and primary embeddings |
+| `GEMINI_API_KEY`            | No       | Gemini key for embeddings when OpenAI is unavailable |
+| `EMBEDDINGS_PROVIDER`       | No       | Force `openai` or `gemini`; defaults to OpenAI when available |
 | `UPSTASH_VECTOR_REST_URL`   | Yes      | Upstash Vector endpoint                          |
 | `UPSTASH_VECTOR_REST_TOKEN` | Yes      | Upstash Vector auth token                        |
 | `UPSTASH_REDIS_REST_URL`    | Yes      | Upstash Redis endpoint for rate limits and BM25  |
