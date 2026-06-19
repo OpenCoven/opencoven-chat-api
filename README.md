@@ -26,11 +26,12 @@ The OpenCoven documentation source is `https://docs.opencoven.ai/llms-full.txt`.
 
 ## API Endpoints
 
-| Endpoint       | Method | Description                               |
-| -------------- | ------ | ----------------------------------------- |
-| `/api/chat`    | POST   | Send a question, get a streaming response |
-| `/api/health`  | GET    | Health check                              |
-| `/api/webhook` | POST   | GitHub docs webhook for re-indexing       |
+| Endpoint              | Method | Description                               |
+| --------------------- | ------ | ----------------------------------------- |
+| `/api/chat`           | POST   | Send a question, get a streaming response |
+| `/api/health`         | GET    | Health check                              |
+| `/api/webhook`        | POST   | GitHub docs webhook for re-indexing       |
+| `/api/cron/reindex`   | POST   | Protected scheduled re-index safety net   |
 
 ### POST /api/chat
 
@@ -88,6 +89,7 @@ cp .env.example .env
 | `UPSTASH_REDIS_REST_TOKEN`  | Yes      | Upstash Redis auth token                         |
 | `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
+| `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
 | `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
 
 3. Build the vector index:
@@ -117,11 +119,30 @@ Runs locally at http://localhost:3000.
 
 ## Automatic Documentation Updates
 
-The API supports automatic re-indexing when documentation changes are pushed to the docs repository's main branch.
+The API supports automatic re-indexing when documentation changes are pushed to the docs repository's main branch, plus a protected scheduled safety net for missed webhooks or docs deploy timing races.
 
 1. A push is made to the main branch of the docs repository.
 2. GitHub sends a webhook payload to `/api/webhook`.
-3. The API verifies the signature, fetches `https://docs.opencoven.ai/llms-full.txt`, chunks the content, generates embeddings, and replaces the vector store.
+3. The API verifies the signature, fetches `https://docs.opencoven.ai/llms-full.txt`, hashes the published docs, and skips re-indexing when the content is unchanged.
+4. When the hash changed, Salem chunks the content, generates embeddings, replaces the vector store, rebuilds BM25, and stores the new docs hash in Upstash Redis.
+
+### Scheduled Re-index
+
+Configure QStash or another scheduler to call the protected endpoint periodically:
+
+```sh
+curl -X POST "https://salem.opencoven.ai/api/cron/reindex" \
+  -H "Authorization: Bearer $REINDEX_SECRET"
+```
+
+Use `?force=1` only for manual recovery when you need to rebuild the index even if `llms-full.txt` has the same hash:
+
+```sh
+curl -X POST "https://salem.opencoven.ai/api/cron/reindex?force=1" \
+  -H "Authorization: Bearer $REINDEX_SECRET"
+```
+
+The scheduler should run after docs publishing has had time to update `https://docs.opencoven.ai/llms-full.txt`. A daily schedule is usually enough; every few hours is reasonable while docs are changing quickly.
 
 ## License
 

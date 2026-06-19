@@ -12,6 +12,8 @@ const page = read("app/page.tsx");
 const chatForm = read("app/components/chat-form.tsx");
 const chatRoute = read("app/api/chat/route.ts");
 const indexer = read("rag/indexer.ts");
+const reindexFreshness = read("rag/reindex-freshness.ts");
+const cronRoute = read("app/api/cron/reindex/route.ts");
 const envExample = read(".env.example");
 
 assert.equal(packageJson.name, "opencoven-chat-api");
@@ -39,6 +41,8 @@ for (const [name, content] of Object.entries({
   chatForm,
   chatRoute,
   indexer,
+  reindexFreshness,
+  cronRoute,
   envExample,
 })) {
   assert.ok(
@@ -53,12 +57,19 @@ for (const [name, content] of Object.entries({
 
 assert.ok(readme.includes("Salem Docs Assistant API"));
 assert.ok(readme.includes("https://docs.opencoven.ai/llms-full.txt"));
+assert.ok(readme.includes("https://salem.opencoven.ai/api/cron/reindex"));
+assert.ok(!readme.includes("<salem-api-domain>"));
 assert.ok(layout.includes("Salem | OpenCoven Documentation Assistant"));
 assert.ok(page.includes("Salem"));
 assert.ok(!chatForm.includes("Benchmark"));
 assert.ok(!chatForm.includes("diagnostics"));
 assert.ok(chatRoute.includes("You are Salem"));
 assert.ok(indexer.includes("https://docs.opencoven.ai"));
+assert.ok(reindexFreshness.includes("salem:docs:index:last"));
+assert.ok(reindexFreshness.includes("docsHash"));
+assert.ok(cronRoute.includes("REINDEX_SECRET"));
+assert.ok(cronRoute.includes("authorization"));
+assert.ok(envExample.includes("REINDEX_SECRET"));
 assert.ok(!envExample.includes("ENABLE_OBSERVABILITY"));
 
 console.log("validate-opencoven-port: ok");

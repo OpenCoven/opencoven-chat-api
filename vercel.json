@@ -5,6 +5,7 @@
   "rewrites": [
     { "source": "/chat", "destination": "/api/chat" },
     { "source": "/health", "destination": "/api/health" },
-    { "source": "/webhook", "destination": "/api/webhook" }
+    { "source": "/webhook", "destination": "/api/webhook" },
+    { "source": "/cron/reindex", "destination": "/api/cron/reindex" }
   ]
 }

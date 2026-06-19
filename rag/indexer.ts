@@ -46,8 +46,8 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-const DOCS_BASE_URL = "https://docs.opencoven.ai";
-const LLMS_FULL_URL = `${DOCS_BASE_URL}/llms-full.txt`;
+export const DOCS_BASE_URL = "https://docs.opencoven.ai";
+export const LLMS_FULL_URL = `${DOCS_BASE_URL}/llms-full.txt`;
 const SUPPLEMENTARY_DIR = join(process.cwd(), "docs");
 
 interface DocPage {
@@ -57,7 +57,7 @@ interface DocPage {
   content: string;
 }
 
-interface IndexResult {
+export interface IndexResult {
   success: boolean;
   pagesProcessed: number;
   chunksCreated: number;
