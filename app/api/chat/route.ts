@@ -1,7 +1,7 @@
 /**
  * Chat Endpoint
  * Handles hybrid RAG-based question answering with streaming responses.
- * Features: Multi-strategy retrieval, Cohere reranking, and observability.
+ * Features: multi-strategy retrieval and optional Cohere reranking.
  */
 import { NextRequest } from "next/server";
 import { Embeddings } from "@/rag/embeddings";
@@ -12,11 +12,6 @@ import { classifyQuery, type ClassifiedQuery } from "@/rag/classifier";
 import { BM25Searcher, loadTermIndex } from "@/rag/bm25-searcher";
 import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
 import { getReranker, type RerankResult } from "@/rag/reranker";
-import {
-  getObservabilityService,
-  generateQueryId,
-  type QueryLog,
-} from "@/rag/observability";
 
 export const runtime = "edge";
 
@@ -24,14 +19,24 @@ const MAX_MESSAGE_LENGTH = 2000;
 const ENABLE_HYBRID = process.env.ENABLE_HYBRID_SEARCH === "true";
 const LOW_CONFIDENCE_THRESHOLD = 0.3;
 
-const ALLOWED_ORIGINS = [
-  "https://docs.openclaw.ai",
-  "https://claw-docs.openknot.ai",
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://docs.opencoven.ai",
+  "https://opencoven.ai",
+  "https://salem.opencoven.ai",
 ];
+
+function allowedOrigins(): string[] {
+  const configured = process.env.ALLOWED_ORIGINS
+    ?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return configured?.length ? configured : DEFAULT_ALLOWED_ORIGINS;
+}
 
 function getCorsHeaders(request: Request) {
   const origin = request.headers.get("Origin");
-  const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : "";
+  const allowedOrigin = origin && allowedOrigins().includes(origin) ? origin : "";
 
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
@@ -67,7 +72,7 @@ function jsonResponse(
 }
 
 function buildSystemPrompt(context: string): string {
-  return `You are an expert assistant for OpenClaw documentation.
+  return `You are Salem, the OpenCoven documentation assistant.
 
 INSTRUCTIONS:
 1. Answer ONLY from the provided documentation excerpts
@@ -88,29 +93,30 @@ ${context}`;
 
 /**
  * Broader prompt used when retrieval confidence is low or no docs match.
- * Allows general AI/agent knowledge while relating back to OpenClaw.
+ * Allows general AI/agent knowledge while relating back to OpenCoven.
  */
 function buildGeneralPrompt(context: string): string {
   const contextBlock = context
     ? `\n\nThe following documentation excerpts may be partially relevant — cite them with [Source Title](URL) if you use them:\n\n${context}`
     : "";
 
-  return `You are an expert assistant for OpenClaw — an open-source AI agent framework.
+  return `You are Salem, the OpenCoven documentation assistant.
+OpenCoven is an open, local-first ecosystem for persistent AI familiars with memory, identity, tools, and observable work.
 You have deep knowledge of AI, AI agents, LLMs, RAG, prompt engineering, and related topics.
 
 INSTRUCTIONS:
 1. Answer the user's question using your general knowledge of AI and AI agents
-2. Where relevant, explain how the topic relates to OpenClaw or how OpenClaw handles it
+2. Where relevant, explain how the topic relates to OpenCoven, Cave, Coven Code, CastCodes, or familiar identity
 3. If documentation excerpts are provided and relevant, cite them using [Source Title](URL) format
 4. Clearly distinguish between information from the docs and your general knowledge
 5. Be concise but complete
-6. If you are unsure about OpenClaw-specific details, say so rather than guessing
+6. If you are unsure about OpenCoven-specific details, say so rather than guessing
 
 SCOPE:
 - AI concepts, architectures, and best practices
 - AI agents, tool use, planning, and orchestration
 - LLMs, embeddings, RAG, vector databases
-- OpenClaw features, APIs, and workflows
+- OpenCoven features, APIs, products, and workflows
 - Comparisons with other frameworks (when asked)
 - General software engineering in the context of AI applications${contextBlock}`;
 }
@@ -127,8 +133,7 @@ export async function POST(request: NextRequest) {
     request.headers.forEach((value, key) => {
       headersObj[key] = value;
     });
-    const clientIp = getClientIp(headersObj);
-    const rateLimitResult = await checkRateLimit(clientIp);
+    const rateLimitResult = await checkRateLimit(getClientIp(headersObj));
 
     const rateLimitHeaders: Record<string, string> = {};
     if (rateLimitResult) {
@@ -445,23 +450,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Log successful query (async, non-blocking)
-    logQueryAsync(queryId, {
-      timestamp: startTime,
-      query: trimmedMessage,
-      intent: classified.intent,
-      strategy: classified.strategy,
-      retrievalMs,
-      rerankMs,
-      totalMs: Date.now() - startTime,
-      resultCount: finalResults.length,
-      topChunkIds: finalResults.slice(0, 5).map((r) => r.id),
-      topScores: topScores.slice(0, 5),
-      model,
-      success: true,
-      clientIp,
-    });
-
     // Create a TransformStream to process SSE data
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
@@ -541,7 +529,7 @@ export async function POST(request: NextRequest) {
 
 /**
  * Computes a 1–5 relevance rank estimating how valuable the response is
- * for an OpenClaw builder. Factors in retrieval quality, coverage,
+ * for an OpenCoven builder. Factors in retrieval quality, coverage,
  * query intent, and whether docs were used vs general fallback.
  *
  *   5 = Direct, high-confidence docs answer to a builder-actionable question
@@ -578,15 +566,8 @@ function computeRelevanceRank(
   return Math.max(1, Math.min(5, Math.round(rank)));
 }
 
-/**
- * Log query asynchronously without blocking the response.
- */
-function logQueryAsync(
-  queryId: string,
-  data: Omit<QueryLog, "id">
-): void {
-  const observability = getObservabilityService();
-  observability.logQuery({ id: queryId, ...data }).catch((err) => {
-    console.error("Failed to log query:", err);
-  });
+function generateQueryId(): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 10);
+  return `${timestamp}-${random}`;
 }

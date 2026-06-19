@@ -1,18 +1,18 @@
-# OpenClaw Docs Agent API
+# Salem Docs Assistant API
 
-![OpenClaw Docs Agent](public/og-image.png)
+![Salem Docs Assistant](public/og-image.png)
 
-AI-powered documentation chatbot API for [OpenClaw](https://openclaw.ai), built by [OpenKnot](https://openknot.ai).
-
-This powers the embedded docs agent that helps users navigate and understand OpenClaw's documentation through natural conversation.
+AI-powered documentation chatbot API for [OpenCoven](https://opencoven.ai). Salem helps people navigate OpenCoven documentation through natural conversation.
 
 ## Overview
 
-This API serves as the backend for OpenClaw's docs chat widget. It uses RAG (Retrieval-Augmented Generation) to:
+This API serves Salem, the OpenCoven docs and pathfinding assistant. It uses RAG (Retrieval-Augmented Generation) to:
 
-1. Index OpenClaw documentation into a vector store
+1. Index OpenCoven documentation into a vector store
 2. Retrieve relevant docs based on user questions
-3. Stream AI-generated answers with context from the documentation
+3. Stream AI-generated answers grounded in the documentation
+
+The OpenCoven documentation source is `https://docs.opencoven.ai/llms-full.txt`.
 
 ## Stack
 
@@ -20,8 +20,8 @@ This API serves as the backend for OpenClaw's docs chat widget. It uses RAG (Ret
 - **Runtime**: [Bun](https://bun.sh)
 - **Deployment**: [Vercel](https://vercel.com) Edge Functions
 - **Vector Store**: [Upstash Vector](https://upstash.com/vector)
-- **Rate Limiting**: [Upstash Redis](https://upstash.com/redis)
-- **AI**: [OpenAI](https://openai.com) (gpt-4.1-mini for chat, text-embedding-3-large for embeddings)
+- **Rate Limiting / BM25 Index**: [Upstash Redis](https://upstash.com/redis)
+- **AI**: OpenAI for chat completions, Gemini for embeddings, optional Cohere reranking
 - **Language**: TypeScript
 
 ## API Endpoints
@@ -36,11 +36,11 @@ This API serves as the backend for OpenClaw's docs chat widget. It uses RAG (Ret
 
 ```json
 {
-  "message": "How do I get started with OpenClaw?"
+  "message": "How do I get started with OpenCoven?"
 }
 ```
 
-Returns a streaming `text/plain` response with an AI-generated answer grounded in OpenClaw documentation.
+Returns a streaming `text/plain` response with an AI-generated answer grounded in OpenCoven documentation.
 
 **Rate Limit Headers:**
 
@@ -48,7 +48,19 @@ Returns a streaming `text/plain` response with an AI-generated answer grounded i
 - `X-RateLimit-Remaining` - Requests remaining in window
 - `X-RateLimit-Reset` - Timestamp when the limit resets
 
-**CORS:** The API allows requests from configured origins. To add your domain, update the `ALLOWED_ORIGINS` array in `app/api/chat/route.ts`.
+**Debug Headers:**
+
+- `X-Query-Id`
+- `X-Best-Score`
+- `X-Low-Confidence`
+- `X-Result-Count`
+- `X-Strategy`
+- `X-Intent`
+- `X-Retrieval-Ms`
+- `X-Rerank-Ms`
+- `X-Relevance-Rank`
+
+No persistent query analytics or feedback endpoint is included.
 
 ## Setup
 
@@ -66,16 +78,19 @@ cp .env.example .env
 
 ### Environment Variables
 
-| Variable                    | Required | Description                            |
-| --------------------------- | -------- | -------------------------------------- |
-| `OPENAI_API_KEY`            | Yes      | OpenAI API key                         |
-| `UPSTASH_VECTOR_REST_URL`   | Yes      | Upstash Vector endpoint                |
-| `UPSTASH_VECTOR_REST_TOKEN` | Yes      | Upstash Vector auth token              |
-| `UPSTASH_REDIS_REST_URL`    | Yes      | Upstash Redis endpoint (rate limiting) |
-| `UPSTASH_REDIS_REST_TOKEN`  | Yes      | Upstash Redis auth token               |
-| `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook (required for automatic re-indexing) |
+| Variable                    | Required | Description                                      |
+| --------------------------- | -------- | ------------------------------------------------ |
+| `GEMINI_API_KEY`            | Yes      | Gemini API key for embeddings                    |
+| `OPENAI_API_KEY`            | Yes      | OpenAI API key for streaming chat completions    |
+| `UPSTASH_VECTOR_REST_URL`   | Yes      | Upstash Vector endpoint                          |
+| `UPSTASH_VECTOR_REST_TOKEN` | Yes      | Upstash Vector auth token                        |
+| `UPSTASH_REDIS_REST_URL`    | Yes      | Upstash Redis endpoint for rate limits and BM25  |
+| `UPSTASH_REDIS_REST_TOKEN`  | Yes      | Upstash Redis auth token                         |
+| `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
+| `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
+| `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
 
-3. Build the vector index (indexes documentation into Upstash):
+3. Build the vector index:
 
 ```sh
 bun run build:index
@@ -96,57 +111,17 @@ Runs locally at http://localhost:3000.
 | `bun run dev`         | Start development server              |
 | `bun run build`       | Build for production                  |
 | `bun run start`       | Start production server               |
-| `bun run lint`        | Run ESLint                            |
+| `bun run test`        | Validate OpenCoven/Salem port wiring  |
 | `bun run build:index` | Index documentation into vector store |
 | `bun run deploy`      | Deploy to Vercel                      |
 
-## Deploy
-
-```sh
-bun run deploy
-```
-
-Deploys to Vercel.
-
 ## Automatic Documentation Updates
 
-The API supports automatic re-indexing when documentation changes are pushed to the main branch. This is powered by a GitHub webhook that triggers the `/api/webhook` endpoint.
+The API supports automatic re-indexing when documentation changes are pushed to the docs repository's main branch.
 
-### How It Works
-
-1. A push is made to the `main` (or `master`) branch of your docs repository
-2. GitHub sends a webhook payload to `/api/webhook`
-3. The API verifies the signature, fetches `https://docs.openclaw.ai/llms-full.txt`, chunks the content, generates embeddings, and replaces the vector store
-
-### Setting Up the Webhook
-
-1. **Set the webhook secret** in your environment variables:
-
-   ```sh
-   GITHUB_WEBHOOK_SECRET=your-secret-here
-   ```
-
-2. **Create a webhook in your docs repository**:
-   - Go to your docs repo → Settings → Webhooks → Add webhook
-   - **Payload URL**: `https://your-api-domain.com/api/webhook`
-   - **Content type**: `application/json`
-   - **Secret**: Use the same value as `GITHUB_WEBHOOK_SECRET`
-   - **Events**: Select "Just the push event"
-
-3. **Verify it's working**:
-   - GitHub sends a `ping` event when the webhook is created
-   - Check the webhook's "Recent Deliveries" tab for the response
-   - Push a change to main and confirm re-indexing occurs
-
-### Webhook Status
-
-You can check the webhook status at any time:
-
-```sh
-curl https://your-api-domain.com/api/webhook
-```
-
-Returns the current indexing status, last indexed time, and result of the most recent indexing run.
+1. A push is made to the main branch of the docs repository.
+2. GitHub sends a webhook payload to `/api/webhook`.
+3. The API verifies the signature, fetches `https://docs.opencoven.ai/llms-full.txt`, chunks the content, generates embeddings, and replaces the vector store.
 
 ## License
 

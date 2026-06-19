@@ -19,19 +19,19 @@ export default async function Home() {
       <header className="hero-header">
         <div className="logo-mark">
           <Image
-            src="/openknots-logo.png"
-            alt="OpenKnots Logo"
+            src="/logo.svg"
+            alt="Salem"
             width={40}
             height={40}
             priority
           />
         </div>
         <div className="hero-text">
-          <h1>OpenClaw</h1>
+          <h1>Salem</h1>
           <span className="hero-sep">/</span>
-          <span className="hero-tag">Hybrid Search</span>
+          <span className="hero-tag">OpenCoven Docs</span>
         </div>
-        <span className="hero-badge">by OpenKnots</span>
+        <span className="hero-badge">OpenCoven</span>
       </header>
 
       <div className="status-bar">
@@ -78,13 +78,13 @@ export default async function Home() {
       </div> */}
 
       <footer>
-        <a href="https://github.com/OpenKnots" className="footer-brand" target="_blank" rel="noopener noreferrer">
-          <Image src="/openknots-logo.png" alt="OpenKnots" width={20} height={20} />
-          <span>OpenKnots</span>
+        <a href="https://opencoven.ai" className="footer-brand" target="_blank" rel="noopener noreferrer">
+          <Image src="/logo.svg" alt="OpenCoven" width={20} height={20} />
+          <span>OpenCoven</span>
         </a>
         <nav className="footer-nav">
-          <a href="https://docs.openclaw.ai" target="_blank" rel="noopener noreferrer">Docs</a>
-          <a href="https://github.com/OpenKnots/openclaw-chat-api" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://docs.opencoven.ai" target="_blank" rel="noopener noreferrer">Docs</a>
+          <a href="https://github.com/OpenCoven/opencoven-chat-api" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="/api/health">Status</a>
         </nav>
         <span className="footer-copy">MIT License</span>

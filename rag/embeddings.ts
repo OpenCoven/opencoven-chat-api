@@ -4,7 +4,7 @@
  *
  * Switched from OpenAI text-embedding-3-large to Gemini gemini-embedding-001
  * to eliminate dependency on the frequently-revoked OPENAI_API_KEY.
- * The OpenClaw memory-search layer already uses Gemini successfully.
+ * The production memory-search layer already uses Gemini successfully.
  *
  * Gemini gemini-embedding-001 produces 3072-dimensional vectors —
  * identical dimensionality to OpenAI text-embedding-3-large, so

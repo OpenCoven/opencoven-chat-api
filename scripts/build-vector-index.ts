@@ -1,10 +1,10 @@
 /**
- * Build script to index OpenClaw documentation into Upstash Vector.
+ * Build script to index OpenCoven documentation into Upstash Vector.
  * Run with: bun run build:index
  */
 import { indexDocs } from "../rag/indexer";
 
-console.log("🦞 Starting documentation indexing...\n");
+console.log("Starting OpenCoven documentation indexing...\n");
 
 const result = await indexDocs();
 
