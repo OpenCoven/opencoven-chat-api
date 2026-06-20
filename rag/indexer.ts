@@ -50,6 +50,20 @@ export const DOCS_BASE_URL = "https://docs.opencoven.ai";
 export const LLMS_FULL_URL = `${DOCS_BASE_URL}/llms-full.txt`;
 const SUPPLEMENTARY_DIR = join(process.cwd(), "docs");
 
+// Coven Code docs (code.opencoven.ai) are a client-rendered SPA with no
+// llms-full.txt, so we source the published pages from the markdown that
+// generates the site: OpenCoven/coven-code's top-level docs/ directory.
+export const COVEN_CODE_BASE_URL = "https://code.opencoven.ai";
+const COVEN_CODE_TREE_API =
+  "https://api.github.com/repos/OpenCoven/coven-code/git/trees/main?recursive=1";
+const COVEN_CODE_RAW_BASE =
+  "https://raw.githubusercontent.com/OpenCoven/coven-code/main/";
+// Repo docs/ files that exist but are not published as user-facing pages.
+const COVEN_CODE_DOC_EXCLUDES = new Set([
+  "docs/AUDIT-2026-06.md",
+  "docs/SECURITY_PERF_AUDIT.md",
+]);
+
 interface DocPage {
   url: string;
   path: string;
@@ -126,6 +140,75 @@ async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
   }
 
   console.log(`Parsed ${pages.length} documentation pages from llms-full.txt`);
+  return pages;
+}
+
+/**
+ * Maps a repo docs/ path to its published code.opencoven.ai URL.
+ * e.g. "docs/agents.md" -> "https://code.opencoven.ai/agents",
+ *      "docs/index.md"  -> "https://code.opencoven.ai".
+ */
+function covenCodeUrlForDoc(path: string): string {
+  const slug = path.replace(/^docs\//, "").replace(/\.md$/, "");
+  return slug === "index"
+    ? COVEN_CODE_BASE_URL
+    : `${COVEN_CODE_BASE_URL}/${slug}`;
+}
+
+/**
+ * Fetches Coven Code documentation (code.opencoven.ai) from the source
+ * markdown in OpenCoven/coven-code. Discovers the published pages from the
+ * repo's top-level docs/ directory so new pages are picked up automatically
+ * on every reindex.
+ */
+async function fetchCovenCodeDocs(): Promise<DocPage[]> {
+  console.log(`Fetching Coven Code documentation for ${COVEN_CODE_BASE_URL}...`);
+  const pages: DocPage[] = [];
+
+  const treeResponse = await fetch(COVEN_CODE_TREE_API, {
+    headers: { "User-Agent": "opencoven-chat-api-indexer" },
+  });
+  if (!treeResponse.ok) {
+    throw new Error(`Failed to list coven-code docs: ${treeResponse.status}`);
+  }
+
+  const tree = (await treeResponse.json()) as {
+    tree?: { path: string; type: string }[];
+  };
+
+  // Top-level docs/*.md only — skips nested paths (docs/superpowers/**, etc.)
+  // and any explicitly excluded internal files.
+  const docPaths = (tree.tree ?? [])
+    .filter((entry) => entry.type === "blob")
+    .map((entry) => entry.path)
+    .filter((path) => /^docs\/[^/]+\.md$/.test(path))
+    .filter((path) => !COVEN_CODE_DOC_EXCLUDES.has(path));
+
+  for (const path of docPaths) {
+    const rawResponse = await fetch(`${COVEN_CODE_RAW_BASE}${path}`);
+    if (!rawResponse.ok) {
+      console.warn(`Skipping ${path}: fetch failed (${rawResponse.status})`);
+      continue;
+    }
+
+    const raw = await rawResponse.text();
+    const url = covenCodeUrlForDoc(path);
+    const slug = path.replace(/^docs\//, "").replace(/\.md$/, "");
+
+    // Title from the first markdown heading (index.md wraps it in a <div>).
+    const titleMatch = raw.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : slug;
+
+    const content = cleanMarkdown(raw);
+    if (content.length < 50) {
+      console.warn(`Skipping ${path}: content too short (${content.length} chars)`);
+      continue;
+    }
+
+    pages.push({ url, path: new URL(url).pathname, title, content });
+  }
+
+  console.log(`Parsed ${pages.length} Coven Code documentation pages`);
   return pages;
 }
 
@@ -309,11 +392,27 @@ export async function indexDocs(): Promise<IndexResult> {
     }
 
 
+    const mainDocsCount = pages.length;
+
+    // Merge Coven Code documentation (code.opencoven.ai). Best-effort: a
+    // GitHub outage should not block reindexing the primary docs.
+    let covenCodePages: DocPage[] = [];
+    try {
+      covenCodePages = await fetchCovenCodeDocs();
+      pages.push(...covenCodePages);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Failed to fetch Coven Code docs: ${message}`);
+      errors.push(`coven-code docs: ${message}`);
+    }
+
     // Merge supplementary knowledge base (local docs/ directory)
     const supplementary = loadSupplementaryDocs();
     pages.push(...supplementary);
 
-    console.log(`Fetched ${pages.length - supplementary.length} documentation pages + ${supplementary.length} supplementary pages`);
+    console.log(
+      `Fetched ${mainDocsCount} primary + ${covenCodePages.length} Coven Code + ${supplementary.length} supplementary pages`
+    );
 
     // Chunk all pages
     console.log("Chunking content...");
