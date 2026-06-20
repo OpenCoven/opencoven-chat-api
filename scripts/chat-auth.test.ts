@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import {
   buildChatMessages,
+  canAccessPrivateSources,
+  filterPrivateSourceResults,
   getFollowupAuthStatus,
+  isPrivateSourceUrl,
   normalizeChatHistory,
 } from "../app/api/chat/auth";
 
@@ -39,6 +42,23 @@ try {
   assert.equal(getFollowupAuthStatus(normalized, null), "unauthorized");
   assert.equal(getFollowupAuthStatus(normalized, "wrong"), "unauthorized");
   assert.equal(getFollowupAuthStatus(normalized, "secret-salem"), "authorized");
+  assert.equal(canAccessPrivateSources(null), false);
+  assert.equal(canAccessPrivateSources("wrong"), false);
+  assert.equal(canAccessPrivateSources("secret-salem"), true);
+
+  assert.equal(isPrivateSourceUrl("private://opencoven/research/inline"), true);
+  assert.equal(isPrivateSourceUrl("https://docs.opencoven.ai/docs/reference"), false);
+
+  const publicResult = { title: "Docs", url: "https://docs.opencoven.ai/docs" };
+  const privateResult = { title: "Research", url: "private://opencoven/research/inline" };
+  assert.deepEqual(
+    filterPrivateSourceResults([publicResult, privateResult], false),
+    [publicResult],
+  );
+  assert.deepEqual(
+    filterPrivateSourceResults([publicResult, privateResult], true),
+    [publicResult, privateResult],
+  );
 
   const messages = buildChatMessages({
     systemPrompt: "system",

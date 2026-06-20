@@ -55,6 +55,23 @@ export function getFollowupAuthStatus(
   return submittedPassword === configuredPassword ? "authorized" : "unauthorized";
 }
 
+export function canAccessPrivateSources(submittedPassword: string | null): boolean {
+  const configuredPassword = process.env.SALEM_ADMIN_PASSWORD;
+  return Boolean(configuredPassword && submittedPassword === configuredPassword);
+}
+
+export function isPrivateSourceUrl(url: string): boolean {
+  return url.startsWith("private://");
+}
+
+export function filterPrivateSourceResults<T extends { url: string }>(
+  results: T[],
+  canAccessPrivate: boolean,
+): T[] {
+  if (canAccessPrivate) return results;
+  return results.filter((result) => !isPrivateSourceUrl(result.url));
+}
+
 export function buildChatMessages({
   systemPrompt,
   history,

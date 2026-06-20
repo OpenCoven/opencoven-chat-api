@@ -14,6 +14,8 @@ import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
 import { getReranker, type RerankResult } from "@/rag/reranker";
 import {
   buildChatMessages,
+  canAccessPrivateSources,
+  filterPrivateSourceResults,
   getFollowupAuthStatus,
   normalizeChatHistory,
 } from "./auth";
@@ -447,6 +449,12 @@ export async function POST(request: NextRequest) {
 
       topScores = finalResults.map((r) => r.score);
     }
+
+    finalResults = filterPrivateSourceResults(
+      finalResults,
+      canAccessPrivateSources(followupPassword),
+    );
+    topScores = finalResults.map((r) => r.score);
 
     const hasResults = finalResults.length > 0;
     const bestScore = hasResults ? topScores[0] : 0;
