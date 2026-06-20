@@ -12,6 +12,11 @@ import { classifyQuery, type ClassifiedQuery } from "@/rag/classifier";
 import { BM25Searcher, loadTermIndex } from "@/rag/bm25-searcher";
 import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
 import { getReranker, type RerankResult } from "@/rag/reranker";
+import {
+  buildChatMessages,
+  getFollowupAuthStatus,
+  normalizeChatHistory,
+} from "./auth";
 
 export const runtime = "edge";
 
@@ -41,7 +46,7 @@ function getCorsHeaders(request: Request) {
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Salem-Admin-Password",
     "Access-Control-Expose-Headers": "X-Query-Id, X-Best-Score, X-Threshold, X-Low-Confidence, X-Result-Count, X-Strategy, X-Intent, X-Retrieval-Ms, X-Rerank-Ms, X-Relevance-Rank",
     "Vary": "Origin",
   };
@@ -166,19 +171,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate environment
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (!openaiKey) {
-      return jsonResponse(
-        request,
-        { error: "Server configuration error", status: 500 },
-        500,
-        rateLimitHeaders
-      );
-    }
-
     // Parse body
     let message = "";
+    let chatHistory = normalizeChatHistory(null);
+    let followupPassword: string | null = null;
     const ALLOWED_MODELS = [
       "gpt-5-nano",
       "gpt-5-mini",
@@ -199,6 +195,8 @@ export async function POST(request: NextRequest) {
     try {
       const body = await request.json();
       message = body?.message;
+      chatHistory = normalizeChatHistory(body?.history);
+      followupPassword = request.headers.get("X-Salem-Admin-Password");
       if (
         body?.model &&
         typeof body.model === "string" &&
@@ -248,6 +246,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const followupAuthStatus = getFollowupAuthStatus(
+      chatHistory,
+      followupPassword,
+    );
+
+    if (followupAuthStatus === "not-configured") {
+      return jsonResponse(
+        request,
+        {
+          error: "Follow-up access is not configured",
+          status: 503,
+        },
+        503,
+        rateLimitHeaders
+      );
+    }
+
+    if (followupAuthStatus === "unauthorized") {
+      return jsonResponse(
+        request,
+        {
+          error: "Password required for follow-up conversations",
+          status: 401,
+        },
+        401,
+        rateLimitHeaders
+      );
+    }
+
     if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
       return jsonResponse(
         request,
@@ -256,6 +283,17 @@ export async function POST(request: NextRequest) {
           status: 400,
         },
         400,
+        rateLimitHeaders
+      );
+    }
+
+    // Validate environment
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) {
+      return jsonResponse(
+        request,
+        { error: "Server configuration error", status: 500 },
+        500,
         rateLimitHeaders
       );
     }
@@ -443,10 +481,11 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model,
           stream: true,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: trimmedMessage },
-          ],
+          messages: buildChatMessages({
+            systemPrompt,
+            history: chatHistory,
+            currentMessage: trimmedMessage,
+          }),
         }),
       }
     );
