@@ -210,8 +210,24 @@ h1 {
 }
 
 .chat-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.question-row {
   display: flex;
   gap: 0.75rem;
+}
+
+.password-field {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 320px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .chat-input {
@@ -234,6 +250,16 @@ h1 {
 
 .chat-input::placeholder {
   color: var(--text-muted);
+}
+
+.password-input {
+  width: 100%;
+}
+
+.form-error {
+  color: var(--error);
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .chat-btn {
@@ -270,30 +296,36 @@ h1 {
   transform: none;
 }
 
-.response-wrapper {
+.conversation-log {
   margin-top: 1.2rem;
-}
-
-.response-area {
-  position: relative;
-  margin-top: 0;
-  padding: 1.25rem 1.5rem;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  display: none;
-  min-height: 120px;
-  max-height: 936px;
+  margin-bottom: 1.2rem;
+  display: grid;
+  gap: 0.75rem;
+  max-height: 640px;
   overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
-.response-area.visible {
-  display: block;
-}
-
-.response-wrapper.loading .response-area {
+.salem-message {
+  position: relative;
+  padding: 1.25rem 1.5rem;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.salem-message.user {
+  justify-self: end;
+  max-width: min(86%, 680px);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-size: 0.94rem;
+}
+
+.salem-message.assistant {
+  justify-self: stretch;
+  min-height: 96px;
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .copy-btn {
@@ -319,7 +351,7 @@ h1 {
     background 0.15s ease, border-color 0.2s ease;
 }
 
-.response-area:hover .copy-btn {
+.salem-message.assistant:hover .copy-btn {
   opacity: 1;
   transform: scale(1);
 }
@@ -342,7 +374,7 @@ h1 {
   background: rgba(74, 222, 128, 0.06);
 }
 
-.response-area.loading::after {
+.salem-message.loading::after {
   content: "";
   display: inline-block;
   width: 12px;
@@ -618,7 +650,7 @@ footer {
     gap: 1rem;
   }
 
-  .chat-form {
+  .question-row {
     flex-direction: column;
   }
 

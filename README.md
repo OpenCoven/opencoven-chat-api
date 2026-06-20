@@ -91,7 +91,10 @@ cp .env.example .env
 | `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
 | `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
+| `SALEM_ADMIN_PASSWORD`      | No       | Server-only password required for follow-up conversations after the first website question |
 | `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
+
+`SALEM_ADMIN_PASSWORD` is intentionally not exposed through any `PUBLIC_` or `NEXT_PUBLIC_` variable. Follow-up requests fail closed when this env var is missing; there is no fallback password.
 
 3. Build the vector index:
 
