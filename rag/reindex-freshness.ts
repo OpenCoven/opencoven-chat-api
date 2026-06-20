@@ -1,5 +1,10 @@
 import { Redis } from "@upstash/redis";
-import { indexDocs as defaultIndexDocs, LLMS_FULL_URL, type IndexResult } from "./indexer";
+import {
+  fetchIndexedSourceText,
+  indexDocs as defaultIndexDocs,
+  LLMS_FULL_URL,
+  type IndexResult,
+} from "./indexer";
 
 const REINDEX_STATE_KEY = "salem:docs:index:last";
 
@@ -67,17 +72,7 @@ export function createRedisReindexStateStore(): ReindexStateStore | null {
 }
 
 export async function fetchDocsText(): Promise<string> {
-  const response = await fetch(LLMS_FULL_URL, {
-    headers: {
-      Accept: "text/plain,text/markdown;q=0.9,*/*;q=0.8",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch llms-full.txt for freshness check: ${response.status}`);
-  }
-
-  return await response.text();
+  return await fetchIndexedSourceText();
 }
 
 export async function hashDocsText(content: string): Promise<string> {

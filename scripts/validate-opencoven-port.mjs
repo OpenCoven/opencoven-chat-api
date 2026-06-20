@@ -71,6 +71,8 @@ assert.ok(reindexFreshness.includes("docsHash"));
 assert.ok(cronRoute.includes("REINDEX_SECRET"));
 assert.ok(cronRoute.includes("authorization"));
 assert.ok(envExample.includes("REINDEX_SECRET"));
+assert.ok(indexer.includes("SALEM_PRIVATE_RESEARCH_DOCS_BASE64"));
+assert.ok(envExample.includes("SALEM_PRIVATE_RESEARCH_DOCS_BASE64"));
 assert.ok(!envExample.includes("ENABLE_OBSERVABILITY"));
 
 // Salem agent must be configured as OpenCoven's empowered local familiar.

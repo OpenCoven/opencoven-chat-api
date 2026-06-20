@@ -64,7 +64,7 @@ const COVEN_CODE_DOC_EXCLUDES = new Set([
   "docs/SECURITY_PERF_AUDIT.md",
 ]);
 
-interface DocPage {
+export interface DocPage {
   url: string;
   path: string;
   title: string;
@@ -85,15 +85,19 @@ export interface IndexResult {
  * The format is markdown with sections separated by "# title" headers
  * and "Source: URL" lines.
  */
-async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
-  console.log(`Fetching documentation from ${LLMS_FULL_URL}...`);
-
+async function fetchLlmsFullText(): Promise<string> {
   const response = await fetch(LLMS_FULL_URL);
   if (!response.ok) {
     throw new Error(`Failed to fetch llms-full.txt: ${response.status}`);
   }
 
-  const content = await response.text();
+  return await response.text();
+}
+
+async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
+  console.log(`Fetching documentation from ${LLMS_FULL_URL}...`);
+
+  const content = await fetchLlmsFullText();
   const pages: DocPage[] = [];
 
   // Split by top-level headers (# title)
@@ -141,6 +145,120 @@ async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
 
   console.log(`Parsed ${pages.length} documentation pages from llms-full.txt`);
   return pages;
+}
+
+function titleFromMarkdown(markdown: string, fallback: string): string {
+  const titleMatch = markdown.match(/^#\s+(.+)$/m);
+  return titleMatch ? titleMatch[1].trim() : fallback;
+}
+
+function stripFrontmatter(markdown: string): string {
+  return markdown.replace(/^---\n[\s\S]*?\n---\n+/, "");
+}
+
+function pageFromMarkdown(args: {
+  markdown: string;
+  url: string;
+  path: string;
+  fallbackTitle: string;
+}): DocPage | null {
+  const withoutFrontmatter = stripFrontmatter(args.markdown);
+  const content = cleanMarkdown(withoutFrontmatter);
+  if (content.length < 50) return null;
+
+  return {
+    url: args.url,
+    path: args.path,
+    title: titleFromMarkdown(withoutFrontmatter, args.fallbackTitle),
+    content,
+  };
+}
+
+function decodeBase64Content(value: string): string {
+  return Buffer.from(value.replace(/\s+/g, ""), "base64").toString("utf8");
+}
+
+export async function fetchPrivateResearchDocs(): Promise<DocPage[]> {
+  const pages: DocPage[] = [];
+  const inlineBase64 = process.env.SALEM_PRIVATE_RESEARCH_DOCS_BASE64?.trim();
+
+  if (inlineBase64) {
+    const page = pageFromMarkdown({
+      markdown: decodeBase64Content(inlineBase64),
+      url: "private://opencoven/research/inline",
+      path: "/private-research/inline",
+      fallbackTitle: "OpenCoven Private Research",
+    });
+    if (page) pages.push(page);
+  }
+
+  const repo = process.env.SALEM_PRIVATE_RESEARCH_REPO?.trim();
+  const ref = process.env.SALEM_PRIVATE_RESEARCH_REF?.trim() || "main";
+  const paths = (process.env.SALEM_PRIVATE_RESEARCH_PATHS ?? "")
+    .split(/[,\n]/)
+    .map((path) => path.trim())
+    .filter(Boolean);
+
+  if (repo || paths.length > 0) {
+    const token =
+      process.env.SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN?.trim() ||
+      process.env.GITHUB_TOKEN?.trim() ||
+      process.env.GH_TOKEN?.trim();
+
+    if (!repo || paths.length === 0 || !token) {
+      throw new Error(
+        "Private research GitHub source requires SALEM_PRIVATE_RESEARCH_REPO, SALEM_PRIVATE_RESEARCH_PATHS, and SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN",
+      );
+    }
+
+    for (const sourcePath of paths) {
+      const response = await fetch(
+        `https://api.github.com/repos/${repo}/contents/${encodeURIComponent(sourcePath)}?ref=${encodeURIComponent(ref)}`,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "opencoven-chat-api-indexer",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch private research source ${repo}/${sourcePath}: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as { content?: unknown; encoding?: unknown };
+      if (typeof payload.content !== "string") {
+        throw new Error(`Private research source ${repo}/${sourcePath} did not include file content`);
+      }
+
+      const markdown = decodeBase64Content(payload.content);
+      const page = pageFromMarkdown({
+        markdown,
+        url: `private://github/${repo}/${sourcePath}`,
+        path: `/private-research/github/${repo}/${sourcePath}`,
+        fallbackTitle: sourcePath.replace(/^.*\//, "").replace(/\.(md|mdx)$/, ""),
+      });
+      if (page) pages.push(page);
+    }
+  }
+
+  if (pages.length > 0) {
+    console.log(`Loaded ${pages.length} private research page(s)`);
+  }
+
+  return pages;
+}
+
+export async function fetchIndexedSourceText(): Promise<string> {
+  const parts = [await fetchLlmsFullText()];
+  const privateResearchPages = await fetchPrivateResearchDocs();
+
+  for (const page of privateResearchPages) {
+    parts.push(`# ${page.title}\nSource: ${page.url}\n\n${page.content}`);
+  }
+
+  return parts.join("\n\n---\n\n");
 }
 
 /**
@@ -410,8 +528,14 @@ export async function indexDocs(): Promise<IndexResult> {
     const supplementary = loadSupplementaryDocs();
     pages.push(...supplementary);
 
+    // Merge private research sources when explicitly configured. Fail closed
+    // if configuration exists but cannot be read, so a reindex does not silently
+    // drop proprietary research from Salem.
+    const privateResearchPages = await fetchPrivateResearchDocs();
+    pages.push(...privateResearchPages);
+
     console.log(
-      `Fetched ${mainDocsCount} primary + ${covenCodePages.length} Coven Code + ${supplementary.length} supplementary pages`
+      `Fetched ${mainDocsCount} primary + ${covenCodePages.length} Coven Code + ${supplementary.length} supplementary + ${privateResearchPages.length} private research pages`
     );
 
     // Chunk all pages

@@ -13,6 +13,7 @@ This API serves Salem, the OpenCoven docs and pathfinding assistant. It uses RAG
 3. Stream AI-generated answers grounded in the documentation
 
 The OpenCoven documentation source is `https://docs.opencoven.ai/llms-full.txt`.
+Authorized deployments can also index private OpenCoven research from server-only private sources without exposing those papers through public docs.
 
 ## Stack
 
@@ -92,9 +93,16 @@ cp .env.example .env
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
 | `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
 | `SALEM_ADMIN_PASSWORD`      | No       | Server-only password required for follow-up conversations after the first website question |
+| `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` | No | Base64-encoded private research markdown to include in Salem's index |
+| `SALEM_PRIVATE_RESEARCH_REPO` | No | Private GitHub repo for research sources, for example `OpenCoven/coven-research` |
+| `SALEM_PRIVATE_RESEARCH_REF` | No | Git ref for private research sources, defaults to `main` |
+| `SALEM_PRIVATE_RESEARCH_PATHS` | No | Comma-separated private research markdown paths |
+| `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN` | No | Server-only token for private GitHub research fetches |
 | `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
 
 `SALEM_ADMIN_PASSWORD` is intentionally not exposed through any `PUBLIC_` or `NEXT_PUBLIC_` variable. Follow-up requests fail closed when this env var is missing; there is no fallback password.
+
+Private research variables are also server-only. If `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` is set, Salem indexes that markdown directly. If `SALEM_PRIVATE_RESEARCH_REPO` and `SALEM_PRIVATE_RESEARCH_PATHS` are set, Salem fetches those private Markdown files through the GitHub Contents API using `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN`.
 
 3. Build the vector index:
 
@@ -127,8 +135,8 @@ The API supports automatic re-indexing when documentation changes are pushed to 
 
 1. A push is made to the main branch of the docs repository.
 2. GitHub sends a webhook payload to `/api/webhook`.
-3. The API verifies the signature, fetches `https://docs.opencoven.ai/llms-full.txt`, hashes the published docs, and skips re-indexing when the content is unchanged.
-4. When the hash changed, Salem chunks the content, generates embeddings, replaces the vector store, rebuilds BM25, and stores the new docs hash in Upstash Redis.
+3. The API verifies the signature, fetches `https://docs.opencoven.ai/llms-full.txt` plus configured private research sources, hashes the combined source text, and skips re-indexing when the content is unchanged.
+4. When the hash changed, Salem chunks the content, generates embeddings, replaces the vector store, rebuilds BM25, and stores the new source hash in Upstash Redis.
 
 ### Scheduled Re-index
 
