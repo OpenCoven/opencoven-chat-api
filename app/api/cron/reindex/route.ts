@@ -35,29 +35,11 @@ export function isAuthorizedReindexRequest(request: NextRequest): boolean {
   return Boolean(configured && provided && constantTimeEqual(configured, provided));
 }
 
-export async function GET() {
-  return NextResponse.json({
-    status: "ok",
-    endpoint: "scheduled docs reindex",
-    configured: Boolean(getConfiguredSecret()),
-  });
-}
-
-export async function POST(request: NextRequest) {
-  if (!getConfiguredSecret()) {
-    return NextResponse.json(
-      { status: "error", error: "REINDEX_SECRET or CRON_SECRET is not configured" },
-      { status: 500 },
-    );
-  }
-
-  if (!isAuthorizedReindexRequest(request)) {
-    return NextResponse.json(
-      { status: "error", error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
+/**
+ * Runs the freshness-guarded reindex and builds the JSON response.
+ * Callers must verify authorization before invoking this.
+ */
+async function runReindex(request: NextRequest): Promise<NextResponse> {
   const force = request.nextUrl.searchParams.get("force") === "1";
   const result = await reindexDocsIfChanged({
     trigger: force ? "cron:force" : "cron",
@@ -92,4 +74,39 @@ export async function POST(request: NextRequest) {
         }
       : null,
   });
+}
+
+/**
+ * Vercel Cron triggers this endpoint with a GET carrying
+ * `Authorization: Bearer ${CRON_SECRET}`. When the request is authorized we
+ * run the reindex; otherwise we return a plain (unauthenticated) status check.
+ */
+export async function GET(request: NextRequest) {
+  if (getConfiguredSecret() && isAuthorizedReindexRequest(request)) {
+    return runReindex(request);
+  }
+
+  return NextResponse.json({
+    status: "ok",
+    endpoint: "scheduled docs reindex",
+    configured: Boolean(getConfiguredSecret()),
+  });
+}
+
+export async function POST(request: NextRequest) {
+  if (!getConfiguredSecret()) {
+    return NextResponse.json(
+      { status: "error", error: "REINDEX_SECRET or CRON_SECRET is not configured" },
+      { status: 500 },
+    );
+  }
+
+  if (!isAuthorizedReindexRequest(request)) {
+    return NextResponse.json(
+      { status: "error", error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
+  return runReindex(request);
 }
