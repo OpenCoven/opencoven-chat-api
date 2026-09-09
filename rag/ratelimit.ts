@@ -8,15 +8,15 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
-// Sliding window: 10 requests per 60 seconds per IP
 const RATE_LIMIT_REQUESTS = 10;
 const RATE_LIMIT_WINDOW = "60 s";
+const BRIEF_RATE_LIMIT_REQUESTS = 30;
+const BRIEF_RATE_LIMIT_WINDOW = "60 s";
 
 let ratelimit: Ratelimit | null = null;
+let briefRatelimit: Ratelimit | null = null;
 
-function getRatelimit(): Ratelimit | null {
-  if (ratelimit) return ratelimit;
-
+function redisFromEnv(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -25,7 +25,13 @@ function getRatelimit(): Ratelimit | null {
     return null;
   }
 
-  const redis = new Redis({ url, token });
+  return new Redis({ url, token });
+}
+
+function getRatelimit(): Ratelimit | null {
+  if (ratelimit) return ratelimit;
+  const redis = redisFromEnv();
+  if (!redis) return null;
 
   ratelimit = new Ratelimit({
     redis,
@@ -37,6 +43,21 @@ function getRatelimit(): Ratelimit | null {
   return ratelimit;
 }
 
+function getBriefRatelimit(): Ratelimit | null {
+  if (briefRatelimit) return briefRatelimit;
+  const redis = redisFromEnv();
+  if (!redis) return null;
+
+  briefRatelimit = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(BRIEF_RATE_LIMIT_REQUESTS, BRIEF_RATE_LIMIT_WINDOW),
+    analytics: true,
+    prefix: "opencoven-brief",
+  });
+
+  return briefRatelimit;
+}
+
 export interface RateLimitResult {
   success: boolean;
   limit: number;
@@ -44,16 +65,12 @@ export interface RateLimitResult {
   reset: number;
 }
 
-/**
- * Check rate limit for a given identifier (typically IP address).
- * Returns null if rate limiting is not configured.
- */
-export async function checkRateLimit(identifier: string): Promise<RateLimitResult | null> {
-  const limiter = getRatelimit();
+async function runLimit(
+  limiter: Ratelimit | null,
+  identifier: string,
+): Promise<RateLimitResult | null> {
   if (!limiter) return null;
-
   const result = await limiter.limit(identifier);
-
   return {
     success: result.success,
     limit: result.limit,
@@ -62,18 +79,26 @@ export async function checkRateLimit(identifier: string): Promise<RateLimitResul
   };
 }
 
+/** Existing chat limit: 10 requests / 60 seconds / IP. */
+export async function checkRateLimit(identifier: string): Promise<RateLimitResult | null> {
+  return runLimit(getRatelimit(), identifier);
+}
+
+/** Quick Answer limit: separate 30 requests / 60 seconds / credential+IP identifier. */
+export async function checkBriefRateLimit(identifier: string): Promise<RateLimitResult | null> {
+  return runLimit(getBriefRatelimit(), identifier);
+}
+
 /**
  * Extract client IP from Vercel request headers.
  */
 export function getClientIp(headers: Record<string, string | string[] | undefined>): string {
-  // Vercel provides the real client IP in x-forwarded-for
   const forwarded = headers["x-forwarded-for"];
   if (forwarded) {
     const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
     return ip.trim();
   }
 
-  // Fallback to x-real-ip
   const realIp = headers["x-real-ip"];
   if (realIp) {
     return Array.isArray(realIp) ? realIp[0] : realIp;
