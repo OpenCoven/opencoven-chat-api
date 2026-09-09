@@ -26,6 +26,22 @@ async function sha256(value: string): Promise<string> {
     .join("");
 }
 
+function bearerToken(authorizationHeader: string | null): string | null {
+  if (!authorizationHeader?.startsWith(BEARER_PREFIX)) return null;
+  const token = authorizationHeader.slice(BEARER_PREFIX.length);
+  if (!token || token.length < 24 || token.length > 512 || /\s/.test(token)) {
+    return null;
+  }
+  return token;
+}
+
+export async function getBriefCredentialFingerprint(
+  authorizationHeader: string | null,
+): Promise<string | null> {
+  const token = bearerToken(authorizationHeader);
+  return token ? sha256(token) : null;
+}
+
 export async function getBriefAuthStatus(
   authorizationHeader: string | null,
 ): Promise<BriefAuthStatus> {
@@ -36,12 +52,8 @@ export async function getBriefAuthStatus(
   if (!authorizationHeader) return "missing";
   if (!authorizationHeader.startsWith(BEARER_PREFIX)) return "malformed";
 
-  const token = authorizationHeader.slice(BEARER_PREFIX.length);
-  if (!token || token.length < 24 || token.length > 512 || /\s/.test(token)) {
-    return "malformed";
-  }
-
-  const digest = await sha256(token);
+  const digest = await getBriefCredentialFingerprint(authorizationHeader);
+  if (!digest) return "malformed";
   if (revoked.has(digest)) return "revoked";
   return allowed.has(digest) ? "authorized" : "unauthorized";
 }
