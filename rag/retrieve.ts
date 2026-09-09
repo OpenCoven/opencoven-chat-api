@@ -6,6 +6,7 @@ import { BM25Searcher, loadTermIndex } from "./bm25-searcher";
 import { reciprocalRankFusion, type FusedResult } from "./fusion";
 import { getReranker, type RerankResult } from "./reranker";
 import { filterPrivateSourceResults } from "./private-sources";
+import { buildRetrievalContext, computeRelevanceRank } from "./retrieval-policy";
 
 export type UserRetrievalStrategy = "auto" | "hybrid" | "semantic" | "keyword";
 
@@ -178,15 +179,7 @@ export async function retrieveSalemDocs({
     classified.intent,
     isLowConfidence,
   );
-
-  const context = hasResults
-    ? results
-        .map(
-          (result) =>
-            `[${result.title}](${result.url})\n${result.content.slice(0, 1200)}`,
-        )
-        .join("\n\n---\n\n")
-    : "";
+  const context = buildRetrievalContext(results);
 
   return {
     classified,
@@ -198,28 +191,4 @@ export async function retrieveSalemDocs({
     rerankMs,
     context,
   };
-}
-
-export function computeRelevanceRank(
-  bestScore: number,
-  resultCount: number,
-  intent: string,
-  isLowConfidence: boolean,
-): number {
-  let rank = 0;
-
-  if (bestScore >= 0.75) rank += 2;
-  else if (bestScore >= 0.45) rank += 1.5;
-  else if (bestScore >= 0.25) rank += 1;
-  else if (bestScore >= 0.1) rank += 0.5;
-
-  if (resultCount >= 5) rank += 1;
-  else if (resultCount >= 2) rank += 0.5;
-
-  if (intent === "lookup" || intent === "troubleshooting") rank += 1;
-  else if (intent === "conceptual") rank += 0.5;
-
-  if (!isLowConfidence) rank += 1;
-
-  return Math.max(1, Math.min(5, Math.round(rank)));
 }
