@@ -4,18 +4,14 @@
  * Features: multi-strategy retrieval and optional Cohere reranking.
  */
 import { NextRequest } from "next/server";
-import { Embeddings } from "@/rag/embeddings";
-import { DocsStore } from "@/rag/store-upstash";
-import { Retriever } from "@/rag/retriever-upstash";
 import { checkRateLimit, getClientIp } from "@/rag/ratelimit";
-import { classifyQuery, type ClassifiedQuery } from "@/rag/classifier";
-import { BM25Searcher, loadTermIndex } from "@/rag/bm25-searcher";
-import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
-import { getReranker, type RerankResult } from "@/rag/reranker";
+import {
+  retrieveSalemDocs,
+  type UserRetrievalStrategy,
+} from "@/rag/retrieve";
 import {
   buildChatMessages,
   canAccessPrivateSources,
-  filterPrivateSourceResults,
   getFollowupAuthStatus,
   normalizeChatHistory,
 } from "./auth";
@@ -50,11 +46,10 @@ function getCorsHeaders(request: Request) {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Salem-Admin-Password",
     "Access-Control-Expose-Headers": "X-Query-Id, X-Best-Score, X-Threshold, X-Low-Confidence, X-Result-Count, X-Strategy, X-Intent, X-Retrieval-Ms, X-Rerank-Ms, X-Relevance-Rank",
-    "Vary": "Origin",
+    Vary: "Origin",
   };
 }
 
-// Handle preflight requests
 export async function OPTIONS(request: NextRequest) {
   return new Response(null, {
     status: 204,
@@ -66,7 +61,7 @@ function jsonResponse(
   request: Request,
   data: object,
   status = 200,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
 ) {
   return new Response(JSON.stringify(data), {
     status,
@@ -104,10 +99,6 @@ DOCUMENTATION EXCERPTS:
 ${context}`;
 }
 
-/**
- * Broader prompt used when retrieval confidence is low or no docs match.
- * Allows general AI/agent knowledge while relating back to OpenCoven.
- */
 function buildGeneralPrompt(context: string): string {
   const contextBlock = context
     ? `\n\nThe following documentation excerpts may be partially relevant — cite them with [Source Title](URL) if you use them:\n\n${context}`
@@ -141,12 +132,8 @@ SCOPE:
 
 export async function POST(request: NextRequest) {
   const queryId = generateQueryId();
-  const startTime = Date.now();
-  let retrievalMs = 0;
-  let rerankMs = 0;
 
   try {
-    // Rate limiting
     const headersObj: Record<string, string> = {};
     request.headers.forEach((value, key) => {
       headersObj[key] = value;
@@ -156,24 +143,22 @@ export async function POST(request: NextRequest) {
     const rateLimitHeaders: Record<string, string> = {};
     if (rateLimitResult) {
       rateLimitHeaders["X-RateLimit-Limit"] = rateLimitResult.limit.toString();
-      rateLimitHeaders["X-RateLimit-Remaining"] =
-        rateLimitResult.remaining.toString();
+      rateLimitHeaders["X-RateLimit-Remaining"] = rateLimitResult.remaining.toString();
       rateLimitHeaders["X-RateLimit-Reset"] = rateLimitResult.reset.toString();
 
       if (!rateLimitResult.success) {
         rateLimitHeaders["Retry-After"] = Math.ceil(
-          (rateLimitResult.reset - Date.now()) / 1000
+          (rateLimitResult.reset - Date.now()) / 1000,
         ).toString();
         return jsonResponse(
           request,
           { error: "Too many requests. Please try again later.", status: 429 },
           429,
-          rateLimitHeaders
+          rateLimitHeaders,
         );
       }
     }
 
-    // Parse body
     let message = "";
     let chatHistory = normalizeChatHistory(null);
     let followupPassword: string | null = null;
@@ -184,14 +169,18 @@ export async function POST(request: NextRequest) {
       "gpt-5.1",
       "gpt-5.2",
     ];
-    const ALLOWED_STRATEGIES = ["auto", "hybrid", "semantic", "keyword"] as const;
-    type UserStrategy = (typeof ALLOWED_STRATEGIES)[number];
+    const ALLOWED_STRATEGIES = [
+      "auto",
+      "hybrid",
+      "semantic",
+      "keyword",
+    ] as const;
 
     const defaultModel = process.env.DEFAULT_CHAT_MODEL || "gpt-5-mini";
     let model = ALLOWED_MODELS.includes(defaultModel)
       ? defaultModel
       : "gpt-5-mini";
-    let userStrategy: UserStrategy = "auto";
+    let userStrategy: UserRetrievalStrategy = "auto";
     let confidenceThreshold = LOW_CONFIDENCE_THRESHOLD;
 
     try {
@@ -199,6 +188,7 @@ export async function POST(request: NextRequest) {
       message = body?.message;
       chatHistory = normalizeChatHistory(body?.history);
       followupPassword = request.headers.get("X-Salem-Admin-Password");
+
       if (
         body?.model &&
         typeof body.model === "string" &&
@@ -209,9 +199,9 @@ export async function POST(request: NextRequest) {
       if (
         body?.retrieval &&
         typeof body.retrieval === "string" &&
-        ALLOWED_STRATEGIES.includes(body.retrieval as UserStrategy)
+        ALLOWED_STRATEGIES.includes(body.retrieval as UserRetrievalStrategy)
       ) {
-        userStrategy = body.retrieval as UserStrategy;
+        userStrategy = body.retrieval as UserRetrievalStrategy;
       }
       if (
         typeof body?.confidenceThreshold === "number" &&
@@ -225,7 +215,7 @@ export async function POST(request: NextRequest) {
         request,
         { error: "Invalid JSON", status: 400 },
         400,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
@@ -234,7 +224,7 @@ export async function POST(request: NextRequest) {
         request,
         { error: "message required", status: 400 },
         400,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
@@ -244,7 +234,7 @@ export async function POST(request: NextRequest) {
         request,
         { error: "message required", status: 400 },
         400,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
@@ -256,24 +246,18 @@ export async function POST(request: NextRequest) {
     if (followupAuthStatus === "not-configured") {
       return jsonResponse(
         request,
-        {
-          error: "Follow-up access is not configured",
-          status: 503,
-        },
+        { error: "Follow-up access is not configured", status: 503 },
         503,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
     if (followupAuthStatus === "unauthorized") {
       return jsonResponse(
         request,
-        {
-          error: "Password required for follow-up conversations",
-          status: 401,
-        },
+        { error: "Password required for follow-up conversations", status: 401 },
         401,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
@@ -285,199 +269,32 @@ export async function POST(request: NextRequest) {
           status: 400,
         },
         400,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
-    // Validate environment
     const openaiKey = process.env.OPENAI_API_KEY;
     if (!openaiKey) {
       return jsonResponse(
         request,
         { error: "Server configuration error", status: 500 },
         500,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
-    // Classify query for optimal retrieval strategy
-    const classified: ClassifiedQuery = classifyQuery(trimmedMessage);
+    const retrieval = await retrieveSalemDocs({
+      query: trimmedMessage,
+      userStrategy,
+      confidenceThreshold,
+      enableHybrid: ENABLE_HYBRID,
+      canAccessPrivate: canAccessPrivateSources(followupPassword),
+    });
 
-    // Override strategy if user explicitly selected one (not "auto")
-    if (userStrategy !== "auto") {
-      classified.strategy = userStrategy;
-    }
+    const systemPrompt = retrieval.isLowConfidence
+      ? buildGeneralPrompt(retrieval.context)
+      : buildSystemPrompt(retrieval.context);
 
-    // Initialize RAG components
-    const embeddings = Embeddings.fromEnv();
-    const store = new DocsStore();
-    const retriever = new Retriever(store, embeddings);
-
-    let finalResults: Array<{
-      id: string;
-      content: string;
-      title: string;
-      url: string;
-      score: number;
-    }> = [];
-    let topScores: number[] = [];
-
-    const retrievalStart = Date.now();
-
-    if (ENABLE_HYBRID) {
-      // ===== HYBRID SEARCH PIPELINE =====
-
-      // Load BM25 index
-      const termIndex = await loadTermIndex();
-      const bm25Searcher = termIndex ? new BM25Searcher(termIndex) : null;
-
-      // Retrieve based on strategy
-      let semanticResults: Awaited<ReturnType<typeof retriever.retrieve>> = [];
-      let keywordResults: Array<{ id: string; score: number }> = [];
-
-      // Semantic search (for semantic and hybrid strategies)
-      if (classified.strategy !== "keyword") {
-        semanticResults = await retriever.retrieve(classified.expanded, 20);
-      }
-
-      // Keyword search (for keyword and hybrid strategies)
-      if (bm25Searcher && classified.strategy !== "semantic") {
-        const keywordQuery = classified.keywords.join(" ");
-        keywordResults = bm25Searcher.search(keywordQuery, 20);
-      }
-
-      retrievalMs = Date.now() - retrievalStart;
-
-      // Build chunk map for fusion (from semantic results)
-      const chunkMap = new Map(
-        semanticResults.map((r) => [r.chunk.id, r.chunk])
-      );
-
-      // Fuse results based on strategy
-      let fusedResults: FusedResult[];
-
-      if (classified.strategy === "hybrid" && keywordResults.length > 0 && semanticResults.length > 0) {
-        // Hybrid: combine both using RRF
-        fusedResults = reciprocalRankFusion(
-          semanticResults,
-          keywordResults,
-          chunkMap
-        );
-      } else if (classified.strategy === "keyword" && keywordResults.length > 0) {
-        // Keyword only: need to fetch chunk data for keyword results
-        // For now, fall back to semantic if we have no chunk data
-        if (semanticResults.length > 0) {
-          // Use semantic results that match keyword IDs, prioritized by keyword rank
-          const keywordIds = new Set(keywordResults.map(r => r.id));
-          const matchingResults = semanticResults.filter(r => keywordIds.has(r.chunk.id));
-          fusedResults = matchingResults.map((r, idx) => ({
-            id: r.chunk.id,
-            chunk: r.chunk,
-            semanticRank: null,
-            semanticScore: null,
-            keywordRank: idx + 1,
-            keywordScore: keywordResults.find(kr => kr.id === r.chunk.id)?.score || 0,
-            fusedScore: keywordResults.find(kr => kr.id === r.chunk.id)?.score || 0,
-          }));
-        } else {
-          // No semantic results, need to do a semantic search to get chunk data
-          const semanticFallback = await retriever.retrieve(classified.expanded, 20);
-          semanticFallback.forEach(r => chunkMap.set(r.chunk.id, r.chunk));
-          fusedResults = reciprocalRankFusion(
-            semanticFallback,
-            keywordResults,
-            chunkMap
-          );
-        }
-      } else {
-        // Semantic only or fallback
-        fusedResults = semanticResults.map((r, idx) => ({
-          id: r.chunk.id,
-          chunk: r.chunk,
-          semanticRank: idx + 1,
-          semanticScore: r.score,
-          keywordRank: null,
-          keywordScore: null,
-          fusedScore: r.score,
-        }));
-      }
-
-      // Rerank with Cohere
-      const rerankStart = Date.now();
-      const reranker = getReranker();
-
-      const docsToRerank = fusedResults.slice(0, 25).map((r) => ({
-        id: r.id,
-        content: r.chunk.content,
-        title: r.chunk.title,
-        url: r.chunk.url,
-      }));
-
-      const reranked: RerankResult[] = await reranker.rerank(
-        classified.original,
-        docsToRerank,
-        8
-      );
-
-      rerankMs = Date.now() - rerankStart;
-
-      // Map reranked results back with metadata
-      finalResults = reranked.map((r) => {
-        const original = docsToRerank.find((d) => d.id === r.id)!;
-        return {
-          id: r.id,
-          content: original.content,
-          title: original.title,
-          url: original.url,
-          score: r.relevanceScore,
-        };
-      });
-
-      topScores = finalResults.map((r) => r.score);
-    } else {
-      // ===== LEGACY SEMANTIC-ONLY PIPELINE =====
-      const results = await retriever.retrieve(trimmedMessage, 8);
-      retrievalMs = Date.now() - retrievalStart;
-
-      finalResults = results.map((r) => ({
-        id: r.chunk.id,
-        content: r.chunk.content,
-        title: r.chunk.title,
-        url: r.chunk.url,
-        score: r.score,
-      }));
-
-      topScores = finalResults.map((r) => r.score);
-    }
-
-    finalResults = filterPrivateSourceResults(
-      finalResults,
-      canAccessPrivateSources(followupPassword),
-    );
-    topScores = finalResults.map((r) => r.score);
-
-    const hasResults = finalResults.length > 0;
-    const bestScore = hasResults ? topScores[0] : 0;
-    const isLowConfidence = !hasResults || bestScore < confidenceThreshold;
-
-    const relevanceRank = computeRelevanceRank(
-      bestScore,
-      finalResults.length,
-      classified.intent,
-      isLowConfidence,
-    );
-
-    const context = hasResults
-      ? finalResults
-          .map((result) => `[${result.title}](${result.url})\n${result.content.slice(0, 1200)}`)
-          .join("\n\n---\n\n")
-      : "";
-
-    const systemPrompt = isLowConfidence
-      ? buildGeneralPrompt(context)
-      : buildSystemPrompt(context);
-
-    // Stream response from OpenAI
     const openaiResponse = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -495,7 +312,7 @@ export async function POST(request: NextRequest) {
             currentMessage: trimmedMessage,
           }),
         }),
-      }
+      },
     );
 
     if (!openaiResponse.ok || !openaiResponse.body) {
@@ -503,22 +320,18 @@ export async function POST(request: NextRequest) {
         request,
         { error: `OpenAI API error: ${openaiResponse.status}`, status: 502 },
         502,
-        rateLimitHeaders
+        rateLimitHeaders,
       );
     }
 
-    // Create a TransformStream to process SSE data
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-
     let buffer = "";
 
     const transformStream = new TransformStream({
       transform(chunk, controller) {
         buffer += decoder.decode(chunk, { stream: true });
         const lines = buffer.split("\n");
-
-        // Keep the last (potentially incomplete) line in the buffer
         buffer = lines.pop() || "";
 
         for (const line of lines) {
@@ -534,12 +347,11 @@ export async function POST(request: NextRequest) {
               controller.enqueue(encoder.encode(delta));
             }
           } catch {
-            // Ignore malformed SSE lines
+            // Ignore malformed SSE lines.
           }
         }
       },
       flush() {
-        // Process any remaining buffered data on stream end
         if (buffer.trim().startsWith("data:")) {
           const data = buffer.trim().slice(5).trim();
           if (data && data !== "[DONE]") {
@@ -550,14 +362,13 @@ export async function POST(request: NextRequest) {
                 encoder.encode(delta);
               }
             } catch {
-              // Ignore
+              // Ignore malformed final SSE data.
             }
           }
         }
       },
     });
 
-    // Pipe the OpenAI response through our transform
     const readable = openaiResponse.body.pipeThrough(transformStream);
 
     return new Response(readable, {
@@ -567,60 +378,25 @@ export async function POST(request: NextRequest) {
         ...getCorsHeaders(request),
         ...rateLimitHeaders,
         "X-Query-Id": queryId,
-        "X-Best-Score": bestScore.toFixed(4),
+        "X-Best-Score": retrieval.bestScore.toFixed(4),
         "X-Threshold": confidenceThreshold.toFixed(2),
-        "X-Low-Confidence": isLowConfidence.toString(),
-        "X-Result-Count": finalResults.length.toString(),
-        "X-Strategy": classified.strategy,
-        "X-Intent": classified.intent,
-        "X-Retrieval-Ms": retrievalMs.toString(),
-        "X-Rerank-Ms": rerankMs.toString(),
-        "X-Relevance-Rank": relevanceRank.toString(),
+        "X-Low-Confidence": retrieval.isLowConfidence.toString(),
+        "X-Result-Count": retrieval.results.length.toString(),
+        "X-Strategy": retrieval.classified.strategy,
+        "X-Intent": retrieval.classified.intent,
+        "X-Retrieval-Ms": retrieval.retrievalMs.toString(),
+        "X-Rerank-Ms": retrieval.rerankMs.toString(),
+        "X-Relevance-Rank": retrieval.relevanceRank.toString(),
       },
     });
   } catch (error) {
     console.error("[Error]", error);
-    return jsonResponse(request, { error: "Internal Server Error", status: 500 }, 500);
+    return jsonResponse(
+      request,
+      { error: "Internal Server Error", status: 500 },
+      500,
+    );
   }
-}
-
-/**
- * Computes a 1–5 relevance rank estimating how valuable the response is
- * for an OpenCoven builder. Factors in retrieval quality, coverage,
- * query intent, and whether docs were used vs general fallback.
- *
- *   5 = Direct, high-confidence docs answer to a builder-actionable question
- *   4 = Good docs coverage with solid relevance
- *   3 = Partial docs match or general answer to a relevant topic
- *   2 = Weak match, mostly general knowledge
- *   1 = Off-topic or no useful docs found
- */
-function computeRelevanceRank(
-  bestScore: number,
-  resultCount: number,
-  intent: string,
-  isLowConfidence: boolean,
-): number {
-  let rank = 0;
-
-  // Score component (0–2 points): raw retrieval quality
-  if (bestScore >= 0.75) rank += 2;
-  else if (bestScore >= 0.45) rank += 1.5;
-  else if (bestScore >= 0.25) rank += 1;
-  else if (bestScore >= 0.1) rank += 0.5;
-
-  // Coverage component (0–1 point): how many chunks matched
-  if (resultCount >= 5) rank += 1;
-  else if (resultCount >= 2) rank += 0.5;
-
-  // Intent component (0–1 point): builder-actionable intents score higher
-  if (intent === "lookup" || intent === "troubleshooting") rank += 1;
-  else if (intent === "conceptual") rank += 0.5;
-
-  // Docs vs general penalty (0–1 point)
-  if (!isLowConfidence) rank += 1;
-
-  return Math.max(1, Math.min(5, Math.round(rank)));
 }
 
 function generateQueryId(): string {
