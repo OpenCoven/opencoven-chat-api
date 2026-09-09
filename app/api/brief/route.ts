@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { briefAuthError, getBriefAuthStatus } from "@/rag/brief-auth";
 import {
   BRIEF_SCHEMA_VERSION,
   briefRequestSchema,
@@ -102,6 +103,18 @@ function parseModelAnswer(value: unknown): { sayThis: string; followUp: string |
 export async function POST(request: NextRequest) {
   const id = queryId();
 
+  const authStatus = await getBriefAuthStatus(request.headers.get("authorization"));
+  if (authStatus !== "authorized") {
+    const failure = briefAuthError(authStatus);
+    return json(
+      { error: failure.message, code: failure.code, status: failure.httpStatus },
+      failure.httpStatus,
+      failure.httpStatus === 401
+        ? { "WWW-Authenticate": 'Bearer realm="Salem Quick Answer", scope="salem.brief.read"' }
+        : {},
+    );
+  }
+
   const headersObj: Record<string, string> = {};
   request.headers.forEach((value, key) => {
     headersObj[key] = value;
@@ -109,7 +122,7 @@ export async function POST(request: NextRequest) {
   const rateLimit = await checkRateLimit(getClientIp(headersObj));
   if (rateLimit && !rateLimit.success) {
     return json(
-      { error: "Too many requests. Please try again later.", status: 429 },
+      { error: "Too many requests. Please try again later.", code: "BRIEF_RATE_LIMITED", status: 429 },
       429,
       { "Retry-After": Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000)).toString() },
     );
