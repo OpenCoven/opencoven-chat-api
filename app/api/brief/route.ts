@@ -18,7 +18,10 @@ import {
 import { retrieveSalemEvidence } from "@/rag/retrieve";
 import { createRedisReindexStateStore } from "@/rag/reindex-freshness";
 
-export const runtime = "edge";
+// Freshness reads share the existing reindex module, whose dependency graph
+// includes Node filesystem modules through the indexer. Keep Brief on Node
+// rather than pretending that graph is Edge-compatible or duplicating state.
+export const runtime = "nodejs";
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://docs.opencoven.ai",
