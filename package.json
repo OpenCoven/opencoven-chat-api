@@ -18,9 +18,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node scripts/validate-opencoven-port.mjs && bun scripts/embeddings.test.ts && bun scripts/private-research-sources.test.ts && bun scripts/reindex-freshness.test.ts && bun scripts/reindex-route.test.ts && bun scripts/chat-auth.test.ts && bun scripts/chat-route-auth.test.ts && node scripts/chat-form-followup.test.mjs && bun scripts/brief-contract.test.ts && bun scripts/retrieve.test.ts",
+    "test": "node scripts/validate-opencoven-port.mjs && bun scripts/embeddings.test.ts && bun scripts/private-research-sources.test.ts && bun scripts/reindex-freshness.test.ts && bun scripts/reindex-route.test.ts && bun scripts/chat-auth.test.ts && bun scripts/chat-route-auth.test.ts && node scripts/chat-form-followup.test.mjs && bun scripts/brief-contract.test.ts && bun scripts/retrieve.test.ts && bun scripts/brief-policy.test.ts",
     "test:brief": "bun scripts/brief-contract.test.ts",
     "test:retrieve": "bun scripts/retrieve.test.ts",
+    "test:brief-policy": "bun scripts/brief-policy.test.ts",
     "build:index": "bun scripts/build-vector-index.ts",
     "deploy": "vercel"
   },
