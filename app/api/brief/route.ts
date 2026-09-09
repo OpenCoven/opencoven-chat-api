@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { checkRateLimit, getClientIp } from "@/rag/ratelimit";
+import { checkBriefRateLimit, getClientIp } from "@/rag/ratelimit";
 import {
   briefRequestSchema,
   briefResponseSchema,
@@ -17,6 +17,12 @@ import {
 } from "@/rag/brief-policy";
 import { retrieveSalemEvidence } from "@/rag/retrieve";
 import { createRedisReindexStateStore } from "@/rag/reindex-freshness";
+import {
+  BRIEF_READ_SCOPE,
+  authenticateBriefRead,
+  briefAuthHttpStatus,
+  type BriefAuthStatus,
+} from "./auth";
 
 // Freshness reads share the existing reindex module, whose dependency graph
 // includes Node filesystem modules through the indexer. Keep Brief on Node
@@ -51,7 +57,7 @@ function corsHeaders(request: Request): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     Vary: "Origin",
   };
 }
@@ -70,6 +76,33 @@ function jsonResponse(
       ...headers,
     },
   });
+}
+
+function authFailure(
+  request: Request,
+  status: Exclude<BriefAuthStatus, "authorized">,
+) {
+  const httpStatus = briefAuthHttpStatus(status);
+  const code = `BRIEF_AUTH_${status.replaceAll("-", "_").toUpperCase()}`;
+  const headers: Record<string, string> = {};
+  if (httpStatus === 401) {
+    headers["WWW-Authenticate"] = `Bearer scope="${BRIEF_READ_SCOPE}"`;
+  }
+  return jsonResponse(
+    request,
+    {
+      error:
+        status === "not-configured"
+          ? "Quick Answer access is not configured"
+          : status === "revoked"
+            ? "Quick Answer credential has been revoked"
+            : "Valid Quick Answer credential required",
+      code,
+      status: httpStatus,
+    },
+    httpStatus,
+    headers,
+  );
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -111,11 +144,17 @@ function successResponse(
 export async function POST(request: NextRequest) {
   const queryId = generateQueryId();
 
+  const auth = await authenticateBriefRead(request.headers.get("authorization"));
+  if (auth.status !== "authorized" || !auth.fingerprint) {
+    return authFailure(request, auth.status as Exclude<BriefAuthStatus, "authorized">);
+  }
+
   const requestHeaders: Record<string, string> = {};
   request.headers.forEach((value, key) => {
     requestHeaders[key] = value;
   });
-  const rateLimit = await checkRateLimit(getClientIp(requestHeaders));
+  const clientIp = getClientIp(requestHeaders);
+  const rateLimit = await checkBriefRateLimit(`${auth.fingerprint}:${clientIp}`);
   const rateLimitHeaders: Record<string, string> = {};
   if (rateLimit) {
     rateLimitHeaders["X-RateLimit-Limit"] = rateLimit.limit.toString();
@@ -127,7 +166,7 @@ export async function POST(request: NextRequest) {
       ).toString();
       return jsonResponse(
         request,
-        { error: "Too many requests. Please try again later.", status: 429 },
+        { error: "Too many Quick Answer requests. Please try again later.", code: "BRIEF_RATE_LIMITED", status: 429 },
         429,
         rateLimitHeaders,
       );
