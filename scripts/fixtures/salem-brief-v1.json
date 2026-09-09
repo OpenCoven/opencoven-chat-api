@@ -1,0 +1,96 @@
+{
+  "request": {
+    "question": "What is a familiar?",
+    "audience": "anyone",
+    "depth": "conversation"
+  },
+  "specified": {
+    "schemaVersion": "opencoven.salem-brief/v1",
+    "queryId": "fixture-specified",
+    "question": "What is a familiar?",
+    "answer": {
+      "sayThis": "In this synthetic specification, a familiar is an ongoing AI assistant.",
+      "followUp": "This fixture illustrates a specification claim, not shipped support.",
+      "caveats": ["Synthetic test evidence; not a statement of product availability."]
+    },
+    "classification": {
+      "claimStatus": "specified",
+      "confidence": "high",
+      "safeToGeneralize": false
+    },
+    "evidence": [{
+      "id": "fixture-spec",
+      "title": "Synthetic familiar specification",
+      "url": "https://example.com/specification",
+      "summary": "Test-only specification excerpt for validating wire structure.",
+      "sourceAuthority": "normative",
+      "lifecycle": "current",
+      "repository": "example/fixture",
+      "path": "docs/specification.md",
+      "revision": "1111111111111111111111111111111111111111",
+      "sourceHash": null
+    }],
+    "knowledge": {
+      "sourceRevision": null,
+      "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "indexedAt": "2026-09-08T12:00:00.000Z",
+      "checkedAt": "2026-09-08T12:05:00.000Z",
+      "freshness": "fresh"
+    }
+  },
+  "unknown": {
+    "schemaVersion": "opencoven.salem-brief/v1",
+    "queryId": "fixture-unknown",
+    "question": "Does OpenCoven support every model?",
+    "answer": {
+      "sayThis": "I wouldn't claim that yet.",
+      "followUp": "I do not have sufficient evidence for universal support.",
+      "caveats": []
+    },
+    "classification": {
+      "claimStatus": "unknown",
+      "confidence": "low",
+      "safeToGeneralize": false
+    },
+    "evidence": [],
+    "knowledge": {
+      "sourceRevision": null,
+      "sourceHash": null,
+      "indexedAt": null,
+      "checkedAt": null,
+      "freshness": "unknown"
+    }
+  },
+  "invalidRequests": [
+    null,
+    {},
+    {"question": "What is a familiar?", "audience": "anyone"},
+    {"question": "   ", "audience": "anyone", "depth": "quick"},
+    {"question": "Question", "audience": "admin", "depth": "quick"},
+    {"question": "Question", "audience": "anyone", "depth": "infinite"},
+    {"question": "Question", "audience": "anyone", "depth": "quick", "includePrivateResearch": true}
+  ],
+  "invalidResponses": [
+    {"name": "missing classification", "path": ["classification"], "remove": true},
+    {"name": "missing confidence", "path": ["classification", "confidence"], "remove": true},
+    {"name": "missing generalization flag", "path": ["classification", "safeToGeneralize"], "remove": true},
+    {"name": "string boolean", "path": ["classification", "safeToGeneralize"], "value": "false"},
+    {"name": "unrecognized status", "path": ["classification", "claimStatus"], "value": "shipped"},
+    {"name": "numeric confidence", "path": ["classification", "confidence"], "value": 0.99},
+    {"name": "wrong version", "path": ["schemaVersion"], "value": "opencoven.salem-brief/v2"},
+    {"name": "no evidence for known claim", "path": ["evidence"], "value": []},
+    {"name": "spec cannot be verification", "path": ["classification", "claimStatus"], "value": "verified"},
+    {"name": "spec cannot be implementation", "path": ["classification", "claimStatus"], "value": "implemented"},
+    {"name": "missing freshness", "path": ["knowledge", "freshness"], "remove": true},
+    {"name": "missing source hash", "path": ["knowledge", "sourceHash"], "remove": true},
+    {"name": "fresh without source hash", "path": ["knowledge", "sourceHash"], "value": null},
+    {"name": "fresh without check time", "path": ["knowledge", "checkedAt"], "value": null},
+    {"name": "invalid calendar date", "path": ["knowledge", "indexedAt"], "value": "2026-02-30T12:00:00.000Z"},
+    {"name": "check before indexing", "path": ["knowledge", "checkedAt"], "value": "2026-09-07T12:00:00.000Z"},
+    {"name": "moving revision", "path": ["knowledge", "sourceRevision"], "value": "main"},
+    {"name": "malformed source hash", "path": ["knowledge", "sourceHash"], "value": "latest"},
+    {"name": "missing caveats", "path": ["answer", "caveats"], "remove": true},
+    {"name": "empty spoken answer", "path": ["answer", "sayThis"], "value": " "},
+    {"name": "unrecognized response field", "path": ["admin"], "value": true}
+  ]
+}
