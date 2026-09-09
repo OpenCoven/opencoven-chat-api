@@ -14,6 +14,11 @@ export type FollowupAuthStatus =
   | "unauthorized"
   | "authorized";
 
+export {
+  filterPrivateSourceResults,
+  isPrivateSourceUrl,
+} from "@/rag/private-sources";
+
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_HISTORY_MESSAGE_LENGTH = 2000;
 
@@ -58,18 +63,6 @@ export function getFollowupAuthStatus(
 export function canAccessPrivateSources(submittedPassword: string | null): boolean {
   const configuredPassword = process.env.SALEM_ADMIN_PASSWORD;
   return Boolean(configuredPassword && submittedPassword === configuredPassword);
-}
-
-export function isPrivateSourceUrl(url: string): boolean {
-  return url.startsWith("private://");
-}
-
-export function filterPrivateSourceResults<T extends { url: string }>(
-  results: T[],
-  canAccessPrivate: boolean,
-): T[] {
-  if (canAccessPrivate) return results;
-  return results.filter((result) => !isPrivateSourceUrl(result.url));
 }
 
 export function buildChatMessages({
