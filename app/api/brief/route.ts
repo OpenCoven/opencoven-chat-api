@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
-import { briefAuthError, getBriefAuthStatus } from "@/rag/brief-auth";
+import {
+  briefAuthError,
+  getBriefAuthStatus,
+  getBriefCredentialFingerprint,
+} from "@/rag/brief-auth";
 import {
   BRIEF_SCHEMA_VERSION,
   briefRequestSchema,
@@ -15,7 +19,7 @@ import {
   unknownBriefResponse,
 } from "@/rag/brief-policy";
 import { readBriefKnowledge } from "@/rag/index-status";
-import { checkRateLimit, getClientIp } from "@/rag/ratelimit";
+import { checkBriefRateLimit, getClientIp } from "@/rag/ratelimit";
 import { retrieveSalemDocs } from "@/rag/retrieve";
 
 export const runtime = "edge";
@@ -102,8 +106,9 @@ function parseModelAnswer(value: unknown): { sayThis: string; followUp: string |
 
 export async function POST(request: NextRequest) {
   const id = queryId();
+  const authorization = request.headers.get("authorization");
 
-  const authStatus = await getBriefAuthStatus(request.headers.get("authorization"));
+  const authStatus = await getBriefAuthStatus(authorization);
   if (authStatus !== "authorized") {
     const failure = briefAuthError(authStatus);
     return json(
@@ -119,7 +124,9 @@ export async function POST(request: NextRequest) {
   request.headers.forEach((value, key) => {
     headersObj[key] = value;
   });
-  const rateLimit = await checkRateLimit(getClientIp(headersObj));
+  const fingerprint = await getBriefCredentialFingerprint(authorization);
+  const rateLimitIdentifier = `${fingerprint ?? "unknown"}:${getClientIp(headersObj)}`;
+  const rateLimit = await checkBriefRateLimit(rateLimitIdentifier);
   if (rateLimit && !rateLimit.success) {
     return json(
       { error: "Too many requests. Please try again later.", code: "BRIEF_RATE_LIMITED", status: 429 },
