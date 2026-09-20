@@ -45,12 +45,27 @@ export interface RateLimitResult {
 }
 
 /**
- * Check rate limit for a given identifier (typically IP address).
- * Returns null if rate limiting is not configured.
+ * Check rate limit for a given identifier.
+ *
+ * Prefer a stable, server-derived identifier such as a session user ID. IP
+ * addresses come from client-supplied forwarding headers and are neither
+ * unique per caller nor reliably attacker-controlled.
+ *
+ * Returns null only when rate limiting is legitimately disabled, which is
+ * permitted in development but never in production: a misconfigured or
+ * unreachable limiter must not silently remove the only spend control in
+ * front of a paid model API.
  */
 export async function checkRateLimit(identifier: string): Promise<RateLimitResult | null> {
   const limiter = getRatelimit();
-  if (!limiter) return null;
+  if (!limiter) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Rate limiting is unavailable: UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set in production",
+      );
+    }
+    return null;
+  }
 
   const result = await limiter.limit(identifier);
 
@@ -64,6 +79,10 @@ export async function checkRateLimit(identifier: string): Promise<RateLimitResul
 
 /**
  * Extract client IP from Vercel request headers.
+ *
+ * Only meaningful behind a proxy that overwrites these headers. Treat the
+ * result as a coarse grouping hint, not an identity: callers arriving without
+ * either header all share the "unknown" bucket.
  */
 export function getClientIp(headers: Record<string, string | string[] | undefined>): string {
   // Vercel provides the real client IP in x-forwarded-for

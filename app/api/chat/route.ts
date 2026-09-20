@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import { Embeddings } from "@/rag/embeddings";
 import { DocsStore } from "@/rag/store-upstash";
 import { Retriever } from "@/rag/retriever-upstash";
-import { checkRateLimit, getClientIp } from "@/rag/ratelimit";
+import { checkRateLimit } from "@/rag/ratelimit";
 import { classifyQuery, type ClassifiedQuery } from "@/rag/classifier";
 import { BM25Searcher, loadTermIndex } from "@/rag/bm25-searcher";
 import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
@@ -27,6 +27,7 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_MESSAGE_LENGTH = 2000;
+const MAX_COMPLETION_TOKENS = 2048;
 const ENABLE_HYBRID = process.env.ENABLE_HYBRID_SEARCH === "true";
 const LOW_CONFIDENCE_THRESHOLD = 0.3;
 
@@ -78,6 +79,8 @@ function jsonResponse(
       "Content-Type": "application/json",
       "Cache-Control": "private, no-store",
       ...getCorsHeaders(request),
+      // getCorsHeaders sets Vary: Origin; these responses also vary per session.
+      Vary: "Origin, Cookie",
       ...headers,
     },
   });
@@ -155,12 +158,10 @@ export async function POST(request: NextRequest) {
     const user = await requestUser(request);
     if (!user) return jsonResponse(request, { error: "Sign in required", status: 401 }, 401);
     if (!sameOrigin(request)) return jsonResponse(request, { error: "Request origin is not allowed", status: 403 }, 403);
-    // Rate limiting
-    const headersObj: Record<string, string> = {};
-    request.headers.forEach((value, key) => {
-      headersObj[key] = value;
-    });
-    const rateLimitResult = await checkRateLimit(getClientIp(headersObj));
+    // Rate limiting. This route is authenticated, so key on the session user:
+    // a user ID is server-derived and cannot be rotated by the caller, unlike
+    // the x-forwarded-for value the IP helper reads.
+    const rateLimitResult = await checkRateLimit(`user:${user.id}`);
 
     const rateLimitHeaders: Record<string, string> = {};
     if (rateLimitResult) {
@@ -334,7 +335,7 @@ export async function POST(request: NextRequest) {
 
       // Semantic search (for semantic and hybrid strategies)
       if (classified.strategy !== "keyword") {
-        semanticResults = await retriever.retrieve(classified.expanded, 20);
+        semanticResults = await retriever.retrieve(classified.expanded, 20, user.privateSources);
       }
 
       // Keyword search (for keyword and hybrid strategies)
@@ -378,7 +379,7 @@ export async function POST(request: NextRequest) {
           }));
         } else {
           // No semantic results, need to do a semantic search to get chunk data
-          const semanticFallback = await retriever.retrieve(classified.expanded, 20);
+          const semanticFallback = await retriever.retrieve(classified.expanded, 20, user.privateSources);
           semanticFallback.forEach(r => chunkMap.set(r.chunk.id, r.chunk));
           fusedResults = reciprocalRankFusion(
             semanticFallback,
@@ -433,7 +434,7 @@ export async function POST(request: NextRequest) {
       topScores = finalResults.map((r) => r.score);
     } else {
       // ===== LEGACY SEMANTIC-ONLY PIPELINE =====
-      const results = await retriever.retrieve(trimmedMessage, 8);
+      const results = await retriever.retrieve(trimmedMessage, 8, user.privateSources);
       retrievalMs = Date.now() - retrievalStart;
 
       finalResults = results.map((r) => ({
@@ -487,6 +488,9 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model,
           stream: true,
+          // Without this the completion length is unbounded. The stream reader
+          // caps the stored answer at 64k characters regardless (lib/chat-stream.ts).
+          max_completion_tokens: MAX_COMPLETION_TOKENS,
           messages: buildChatMessages({
             systemPrompt,
             history: chatHistory,

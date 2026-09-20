@@ -5,12 +5,27 @@
  */
 import { Index } from "@upstash/vector";
 
+/**
+ * Whether a chunk may be served to a caller without private-source access.
+ * Derived at index time from the source URL and stored on the vector so the
+ * store itself can enforce the boundary, rather than relying on every caller
+ * to filter results afterwards.
+ */
+export type ChunkVisibility = "public" | "private";
+
+export const PRIVATE_URL_PREFIX = "private://";
+
+export function visibilityForUrl(url: string): ChunkVisibility {
+  return url.startsWith(PRIVATE_URL_PREFIX) ? "private" : "public";
+}
+
 export interface DocsChunk {
   id: string;
   path: string;
   title: string;
   content: string;
   url: string;
+  visibility: ChunkVisibility;
   vector: number[];
 }
 
@@ -25,6 +40,7 @@ interface ChunkMetadata {
   title: string;
   content: string;
   url: string;
+  visibility: ChunkVisibility;
   [key: string]: unknown; // Index signature for Upstash Dict compatibility
 }
 
@@ -70,6 +86,9 @@ export class DocsStore {
           title: chunk.title,
           content: chunk.content,
           url: chunk.url,
+          // Recomputed here rather than trusted from the caller so a chunk can
+          // never be upserted as public with a private:// URL.
+          visibility: visibilityForUrl(chunk.url),
         },
       }));
 
@@ -82,13 +101,24 @@ export class DocsStore {
 
   /**
    * Search for similar chunks using vector similarity.
+   *
+   * `includePrivate` defaults to false so that forgetting to pass it fails
+   * closed. Private chunks are excluded by the store itself via a metadata
+   * filter, so they are never returned to an unprivileged caller in the first
+   * place; the caller-side URL filter in app/api/chat/auth.ts remains as a
+   * second, independent layer.
    */
-  async search(vector: number[], limit: number = 8): Promise<SearchResult[]> {
+  async search(
+    vector: number[],
+    limit: number = 8,
+    includePrivate: boolean = false,
+  ): Promise<SearchResult[]> {
     const results = await this.index.query<ChunkMetadata>({
       vector,
       topK: limit,
       includeMetadata: true,
       includeVectors: false,
+      ...(includePrivate ? {} : { filter: "visibility = 'public'" }),
     });
 
     return results.map((result) => {
@@ -105,6 +135,7 @@ export class DocsStore {
           title: metadata.title,
           content: metadata.content,
           url: metadata.url,
+          visibility: metadata.visibility ?? visibilityForUrl(metadata.url),
           vector: [], // Don't return vector to save memory
         },
         distance,
