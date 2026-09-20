@@ -48,6 +48,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 export const DOCS_BASE_URL = "https://docs.opencoven.ai";
 export const LLMS_FULL_URL = `${DOCS_BASE_URL}/llms-full.txt`;
+export const TYPESAFE_LLMS_FULL_URL = "https://docs.typesafe.ai/llms-full.txt";
 const SUPPLEMENTARY_DIR = join(process.cwd(), "docs");
 
 // Coven Code docs (code.opencoven.ai) are a client-rendered SPA with no
@@ -85,19 +86,19 @@ export interface IndexResult {
  * The format is markdown with sections separated by "# title" headers
  * and "Source: URL" lines.
  */
-async function fetchLlmsFullText(): Promise<string> {
-  const response = await fetch(LLMS_FULL_URL);
+async function fetchLlmsFullText(url: string = LLMS_FULL_URL): Promise<string> {
+  const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch llms-full.txt: ${response.status}`);
+    throw new Error(`Failed to fetch ${url}: ${response.status}`);
   }
 
   return await response.text();
 }
 
-async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
-  console.log(`Fetching documentation from ${LLMS_FULL_URL}...`);
+async function fetchDocsFromLlmsTxt(url: string = LLMS_FULL_URL): Promise<DocPage[]> {
+  console.log(`Fetching documentation from ${url}...`);
 
-  const content = await fetchLlmsFullText();
+  const content = await fetchLlmsFullText(url);
   const pages: DocPage[] = [];
 
   // Split by top-level headers (# title)
@@ -144,6 +145,12 @@ async function fetchDocsFromLlmsTxt(): Promise<DocPage[]> {
   }
 
   console.log(`Parsed ${pages.length} documentation pages from llms-full.txt`);
+  return pages;
+}
+
+export async function fetchTypeSafeDocs(): Promise<DocPage[]> {
+  const pages = await fetchDocsFromLlmsTxt(TYPESAFE_LLMS_FULL_URL);
+  if (pages.length === 0) throw new Error("No TypeSafe documentation pages could be parsed");
   return pages;
 }
 
@@ -251,7 +258,10 @@ export async function fetchPrivateResearchDocs(): Promise<DocPage[]> {
 }
 
 export async function fetchIndexedSourceText(): Promise<string> {
-  const parts = [await fetchLlmsFullText()];
+  const parts = await Promise.all([
+    fetchLlmsFullText(),
+    fetchLlmsFullText(TYPESAFE_LLMS_FULL_URL),
+  ]);
   const privateResearchPages = await fetchPrivateResearchDocs();
 
   for (const page of privateResearchPages) {
@@ -512,6 +522,11 @@ export async function indexDocs(): Promise<IndexResult> {
 
     const mainDocsCount = pages.length;
 
+    // TypeSafe is a required public source. Abort before replacing the index
+    // if it cannot be fetched or parsed.
+    const typeSafePages = await fetchTypeSafeDocs();
+    pages.push(...typeSafePages);
+
     // Merge Coven Code documentation (code.opencoven.ai). Best-effort: a
     // GitHub outage should not block reindexing the primary docs.
     let covenCodePages: DocPage[] = [];
@@ -535,7 +550,7 @@ export async function indexDocs(): Promise<IndexResult> {
     pages.push(...privateResearchPages);
 
     console.log(
-      `Fetched ${mainDocsCount} primary + ${covenCodePages.length} Coven Code + ${supplementary.length} supplementary + ${privateResearchPages.length} private research pages`
+      `Fetched ${mainDocsCount} primary + ${typeSafePages.length} TypeSafe + ${covenCodePages.length} Coven Code + ${supplementary.length} supplementary + ${privateResearchPages.length} private research pages`
     );
 
     // Chunk all pages

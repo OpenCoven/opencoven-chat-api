@@ -31,6 +31,7 @@ const EMBEDDING_DIMENSIONS: Record<string, number> = {
 // To stay within the free tier: send batches of 50 with a 35s delay between batches.
 // This is conservative — upgrade to paid tier to remove the delay.
 const MAX_BATCH_SIZE = 50;
+const OPENAI_MAX_BATCH_SIZE = 100;
 const BATCH_DELAY_MS = 35_000; // 35s between batches (~80 req/min, safely under 100)
 
 const GEMINI_EMBED_BASE =
@@ -124,7 +125,11 @@ export class Embeddings {
     }
 
     if (this.provider === "openai") {
-      return this.embedOpenAI(texts);
+      const results: number[][] = [];
+      for (let i = 0; i < texts.length; i += OPENAI_MAX_BATCH_SIZE) {
+        results.push(...await this.embedOpenAI(texts.slice(i, i + OPENAI_MAX_BATCH_SIZE)));
+      }
+      return results;
     }
 
     const results: number[][] = [];

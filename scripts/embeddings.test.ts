@@ -56,6 +56,20 @@ try {
   }
 
   {
+    const batchSizes: number[] = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init!.body!.toString()) as { input: string[] };
+      batchSizes.push(body.input.length);
+      return jsonResponse({ data: body.input.map((_, index) => ({ index, embedding: [index] })) });
+    }) as typeof fetch;
+
+    const embeddings = new Embeddings({ provider: "openai", openaiApiKey: "test" });
+    const result = await embeddings.embedBatch(Array.from({ length: 101 }, (_, index) => `text ${index}`));
+    assert.deepEqual(batchSizes, [100, 1]);
+    assert.equal(result.length, 101);
+  }
+
+  {
     const calls: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       calls.push(input.toString());

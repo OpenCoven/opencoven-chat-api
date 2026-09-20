@@ -12,7 +12,7 @@ This API serves Salem, the OpenCoven docs and pathfinding assistant. It uses RAG
 2. Retrieve relevant docs based on user questions
 3. Stream AI-generated answers grounded in the documentation
 
-The OpenCoven documentation source is `https://docs.opencoven.ai/llms-full.txt`.
+Public documentation sources are `https://docs.opencoven.ai/llms-full.txt` and `https://docs.typesafe.ai/llms-full.txt`.
 Authorized deployments can also index private OpenCoven research from server-only private sources without exposing those papers through public docs.
 
 ## Stack
@@ -135,7 +135,7 @@ The API supports automatic re-indexing when documentation changes are pushed to 
 
 1. A push is made to the main branch of the docs repository.
 2. GitHub sends a webhook payload to `/api/webhook`.
-3. The API verifies the signature, fetches `https://docs.opencoven.ai/llms-full.txt` plus configured private research sources, hashes the combined source text, and skips re-indexing when the content is unchanged.
+3. The API verifies the signature, fetches the OpenCoven and TypeSafe documentation feeds plus configured private research sources, hashes the combined source text, and skips re-indexing when the content is unchanged.
 4. When the hash changed, Salem chunks the content, generates embeddings, replaces the vector store, rebuilds BM25, and stores the new source hash in Upstash Redis.
 
 ### Scheduled Re-index
