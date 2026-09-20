@@ -28,8 +28,8 @@ Authorized deployments can also index private OpenCoven research from server-onl
 ## Access and recent chats
 
 Salem requires sign-in before showing the chat interface or accepting any question.
-The existing `SALEM_ADMIN_PASSWORD` signs in to the `admin` account (override its
-username with `SALEM_ADMIN_USERNAME`). The former public first-question access and
+`SALEM_ADMIN_PASSWORD` signs in to the `admin` account (override its username with
+`SALEM_ADMIN_USERNAME`). The former public first-question access and
 `X-Salem-Admin-Password` API header are no longer supported.
 
 Additional users must be explicitly provisioned in the server-only
@@ -40,17 +40,18 @@ user's ID for someone else.
 
 To create a user entry, pipe a password of at least 12 characters from a password
 manager into `bun run user:hash alice "Alice"`. The command reads stdin without
-printing the password and outputs an entry containing a salted password hash.
-Collect approved entries in a JSON array and set `SALEM_USERS_JSON` in Vercel:
+printing the password and outputs an entry containing a salted password hash. Add
+`--private` to set `privateSources` on the generated entry. Collect approved
+entries in a JSON array and set `SALEM_USERS_JSON` in Vercel:
 
 ```json
 [{"id":"alice","name":"Alice","passwordHash":"<generated hash>","privateSources":false}]
 ```
 
 Set `privateSources` to `true` only for users permitted to access private research.
-The initial admin account retains private research access. Removing a user or
-changing their password or private-source permission invalidates existing sessions.
-Deploy the environment changes to apply them.
+No account receives it implicitly, including `admin` — see the migration note
+below. Removing a user or changing their password or private-source permission
+invalidates existing sessions. Deploy the environment changes to apply them.
 
 Sessions use an HttpOnly, SameSite=Strict cookie (Secure in production), expire
 after 12 hours, and are revoked on sign-out. Redis is required for sessions and
@@ -62,6 +63,51 @@ Recent chats are stored in Redis under the authenticated user, retaining the lat
 reply. Reopen a recent chat to continue it, or choose **New chat**. Interrupted or
 unsaved replies produce an error and are not added to the saved conversation.
 Chats from before this feature cannot be recovered because they were not stored.
+
+## Retrieved documentation is untrusted input
+
+Salem indexes sources it does not author: `https://docs.typesafe.ai/llms-full.txt`,
+and the markdown behind `https://code.opencoven.ai` (fetched from
+`OpenCoven/coven-code`). Retrieved excerpts used to be interpolated straight into
+the system prompt, which put that text at the same trust level as Salem's own
+instructions — anyone who could land a paragraph in either source could issue
+system-level instructions to every conversation that retrieved it.
+
+The rule now is that **the system message is the only instruction-trusted region,
+and it contains first-party text only.** Four mechanisms enforce it
+(`lib/prompt-context.ts`):
+
+1. **Separation.** Excerpts travel in a `user`-role message immediately before the
+   question. No retrieved byte reaches the system message.
+2. **Unforgeable delimiters.** Each excerpt sits in a
+   `<salem-document nonce="…">` block whose nonce is random per request. Content
+   cannot close a boundary it cannot predict, so it cannot escape its block, end
+   the data region, or impersonate another role. Literal block tags and control
+   characters in content are neutralised.
+3. **Provenance by origin.** Each block is labelled `provenance="opencoven"` or
+   `provenance="external"`, derived from the host the bytes came from — never from
+   the content. A feed's `Source:` line is also bound to the host that served the
+   feed (`rag/indexer.ts`), so `docs.typesafe.ai` cannot declare a page as
+   `docs.opencoven.ai` and be indexed, or cited, as first-party documentation.
+   Provenance governs authority over facts, never authority over instructions.
+4. **Attribute-only citations.** The model is instructed to cite a block's `url`
+   attribute and never a link found inside block content, so a document cannot get
+   Salem to recommend a destination of its choosing.
+
+There is deliberately no blocklist of phrases like "ignore previous instructions".
+The indexed corpus is documentation about LLMs and agents, so prompt-shaped text is
+legitimate content: pattern matching would mangle real docs while a paraphrase
+walked past. The defences are structural instead.
+
+This is containment, not a proof. A model can still be persuaded by text it is
+told to treat as data. What the boundary guarantees is that such text arrives at
+user trust level, labelled, delimited, and unable to forge structure — and that
+Salem has no tools, so the worst case is a wrong answer in one session rather than
+an action taken on the attacker's behalf. Adding any tool or side effect to this
+route means revisiting that conclusion.
+
+Changing the provenance rules requires a reindex to take effect for chunks already
+stored: `bun run build:index`.
 
 ## API Endpoints
 
@@ -149,8 +195,9 @@ cp .env.example .env
 | `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
 | `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
-| `SALEM_ADMIN_PASSWORD`      | Yes, unless named users are configured | Password for the initial admin account. Legacy: see the note below |
+| `SALEM_ADMIN_PASSWORD`      | Yes, unless named users are configured | Admin credential: a `pbkdf2-sha256:600000:...` hash, or a deprecated plaintext password. See the migration note below |
 | `SALEM_ADMIN_USERNAME`      | No       | Initial admin username, defaults to `admin` |
+| `SALEM_ADMIN_PRIVATE_SOURCES` | No     | Set to `true` to grant the admin account private research access. No longer implied |
 | `SALEM_USERS_JSON`          | No       | Approved named users with password hashes and optional private research permission |
 | `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` | No | Base64-encoded private research markdown to include in Salem's index |
 | `SALEM_PRIVATE_RESEARCH_REPO` | No | Private GitHub repo for research sources, for example `your-org/your-private-research` |
@@ -160,14 +207,40 @@ cp .env.example .env
 
 Authentication variables are server-only. Never expose them through `PUBLIC_` or `NEXT_PUBLIC_` variables. Without a configured admin or approved user list, the interface stays locked.
 
-> **Prefer `SALEM_USERS_JSON` over `SALEM_ADMIN_PASSWORD`.** The admin variable is a
-> legacy path: it is compared as an unsalted single-round SHA-256 of the plaintext,
-> while every account in `SALEM_USERS_JSON` uses PBKDF2-SHA256 at 600,000 iterations.
-> It is also the only account that is granted private-research access unconditionally,
-> so it is simultaneously the highest-privilege credential and the weakest-hashed one.
-> Mint a replacement with `bun run user:hash <id> "<name>"`, add it to
-> `SALEM_USERS_JSON` with `privateSources: true`, then unset `SALEM_ADMIN_PASSWORD`.
-> Removing it invalidates any live session issued against it, which is the intent.
+### Retiring the legacy admin credential
+
+`SALEM_ADMIN_PASSWORD` used to hold a plaintext password compared as an unsalted
+single-round SHA-256, and it was the only account granted private research access
+unconditionally — simultaneously the highest-privilege credential and the
+weakest-hashed one. Two things changed so that neither is true any more:
+
+- **The variable now accepts a password hash.** If its value matches
+  `pbkdf2-sha256:600000:<salt>:<hash>`, the account is treated exactly like a
+  `SALEM_USERS_JSON` entry and the legacy verification path is not used at all.
+  A plaintext value still signs in, so no deploy locks itself out, but it is
+  verified with PBKDF2-SHA256 at 600,000 iterations over a salt derived from the
+  account ID, and it logs a deprecation warning on every cold start.
+- **Private research access is opt-in.** `SALEM_ADMIN_PRIVATE_SOURCES=true` grants
+  it; without that variable the admin account has no private-source access, whatever
+  its credential form.
+
+Session records no longer contain the plaintext admin password or a hash of it. The
+session credential version is derived from the PBKDF2 output, so a Redis read is no
+longer enough to recover the password offline.
+
+**To migrate** (either route retires the legacy path; the first keeps the variable):
+
+```sh
+# In place: replace the plaintext value of SALEM_ADMIN_PASSWORD with a hash.
+printf '%s' "$NEW_PASSWORD" | bun run user:hash --hash-only
+
+# Or move the account into SALEM_USERS_JSON and unset SALEM_ADMIN_PASSWORD.
+printf '%s' "$NEW_PASSWORD" | bun run user:hash --private admin "Administrator"
+```
+
+Set `SALEM_ADMIN_PRIVATE_SOURCES=true` if that account needs private research.
+Changing the credential form or the private-source grant invalidates every live
+session issued against the old one, which is the intent.
 
 Private research variables are also server-only. If `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` is set, Salem indexes that markdown directly. If `SALEM_PRIVATE_RESEARCH_REPO` and `SALEM_PRIVATE_RESEARCH_PATHS` are set, Salem fetches those private Markdown files through the GitHub Contents API using `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN`.
 
@@ -195,7 +268,7 @@ Runs locally at http://localhost:3000.
 | `bun run typecheck`   | Type-check with `tsc --noEmit`        |
 | `bun run test`        | Run the full offline test suite       |
 | `bun run build:index` | Index documentation into vector store |
-| `bun run user:hash`   | Hash a password for `SALEM_USERS_JSON` |
+| `bun run user:hash`   | Hash a password for `SALEM_USERS_JSON` (`--private`, `--hash-only`) |
 | `bun run deploy`      | Deploy to Vercel                      |
 
 ### Pre-commit checks

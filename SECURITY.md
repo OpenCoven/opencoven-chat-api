@@ -42,7 +42,8 @@ The following properties are design goals of OpenCoven. If you find a way to vio
 2. **Memory ownership** — a user's stored memory and context must remain under their control
 3. **Agent identity integrity** — a familiar's identity must not be forgeable by another agent or external caller
 4. **Execution boundaries** — agent tool calls must not escape their intended scope
+5. **Instruction/data separation** — content a familiar retrieves, indexes, or is shown must never be able to act as an instruction to it. Whoever can write to a retrieved source must not thereby gain control of the familiar
 
 ---
 
-*Last updated: 2026-07-04*
+*Last updated: 2026-09-20*

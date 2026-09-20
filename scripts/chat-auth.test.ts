@@ -59,6 +59,26 @@ try {
     { role: "assistant", content: "x".repeat(2000) },
     { role: "user", content: "Follow up?" },
   ]);
+
+  // Retrieved documentation must arrive at user trust level, immediately before
+  // the question, and never be folded into the system message.
+  const withContext = buildChatMessages({
+    systemPrompt: "system",
+    history: [],
+    contextMessage: "<salem-document nonce=\"abc\">excerpt</salem-document>",
+    currentMessage: "Follow up?",
+  });
+
+  assert.deepEqual(withContext, [
+    { role: "system", content: "system" },
+    { role: "user", content: "<salem-document nonce=\"abc\">excerpt</salem-document>" },
+    { role: "user", content: "Follow up?" },
+  ]);
+  assert.equal(
+    buildChatMessages({ systemPrompt: "system", history: [], contextMessage: null, currentMessage: "Q" }).length,
+    2,
+    "no retrieval means no context message",
+  );
 } finally {
   restorePassword();
 }

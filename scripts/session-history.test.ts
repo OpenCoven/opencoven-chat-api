@@ -21,7 +21,13 @@ try {
   const bob = (await access.login("bob", "bob-private-password"))!;
   assert.equal(alice.user.id, "alice");
   assert.equal(alice.user.privateSources, false);
+  // Holding the legacy admin credential no longer implies private research
+  // access: it is the weakest-hashed credential in the system, so the grant is
+  // now explicit rather than automatic.
+  assert.equal((await access.login("admin", "existing-admin-password"))!.user.privateSources, false);
+  process.env.SALEM_ADMIN_PRIVATE_SOURCES = "true";
   assert.equal((await access.login("admin", "existing-admin-password"))!.user.privateSources, true);
+  delete process.env.SALEM_ADMIN_PRIVATE_SOURCES;
   assert.equal((await access.authenticate(alice.token))!.id, "alice");
   assert.equal(await access.authenticate(`${alice.token}tampered`), null);
   await access.logout(bob.token);

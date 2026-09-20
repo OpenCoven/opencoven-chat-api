@@ -18,6 +18,11 @@ import {
   normalizeChatHistory,
 } from "./auth";
 
+import {
+  contextNonce,
+  dataHandlingPolicy,
+  renderContextMessage,
+} from "@/lib/prompt-context";
 import { requestUser, sameOrigin } from "@/lib/session-http";
 import { ChatHistoryStore, type SavedChat } from "@/lib/chat-history";
 import { RedisStorage } from "@/lib/storage";
@@ -54,14 +59,21 @@ function jsonResponse(
   });
 }
 
-function buildSystemPrompt(context: string): string {
+/**
+ * Grounded prompt used when retrieval is confident.
+ *
+ * Carries no retrieved text. Excerpts are delivered separately as untrusted
+ * data (lib/prompt-context.ts) so that indexed third-party documentation cannot
+ * reach the instruction-trusted system message.
+ */
+function buildSystemPrompt(nonce: string, hasResults: boolean): string {
   return `You are Salem, OpenCoven's local familiar — the persistent documentation familiar that guides people through the OpenCoven ecosystem.
 OpenCoven is an open, local-first ecosystem for persistent AI familiars with memory, identity, tools, and observable work. You embody that ideal: a grounded, reliable familiar that helps users navigate the docs through natural conversation.
 
 INSTRUCTIONS:
 1. Answer ONLY from the provided documentation excerpts
 2. If the answer is not in the excerpts, clearly state this
-3. Cite sources using [Source Title](URL) format
+3. Cite sources using [Source Title](URL) format, taking both from the excerpt's own attributes
 4. For code examples, use the exact code from docs when available
 5. Be concise but complete
 6. If multiple approaches exist, mention the recommended one first
@@ -76,17 +88,21 @@ CONFIDENCE:
 - If partially confident, caveat with "Based on the available documentation..."
 - If not confident, say "I couldn't find specific documentation for this..."
 
-DOCUMENTATION EXCERPTS:
-${context}`;
+${dataHandlingPolicy(nonce)}
+${
+  hasResults
+    ? "Documentation excerpts for this question follow in the next user message."
+    : "No documentation excerpts were retrieved for this question. Say so rather than inventing sources."
+}`;
 }
 
 /**
  * Broader prompt used when retrieval confidence is low or no docs match.
  * Allows general AI/agent knowledge while relating back to OpenCoven.
  */
-function buildGeneralPrompt(context: string): string {
-  const contextBlock = context
-    ? `\n\nThe following documentation excerpts may be partially relevant — cite them with [Source Title](URL) if you use them:\n\n${context}`
+function buildGeneralPrompt(nonce: string, hasResults: boolean): string {
+  const contextBlock = hasResults
+    ? `\n\nPartially relevant documentation excerpts follow in the next user message — cite them with [Source Title](URL) from their attributes if you use them.`
     : "";
 
   return `You are Salem, OpenCoven's local familiar — the persistent documentation familiar that guides people through the OpenCoven ecosystem.
@@ -112,7 +128,9 @@ SCOPE:
 - LLMs, embeddings, RAG, vector databases
 - OpenCoven features, APIs, products, and workflows
 - Comparisons with other frameworks (when asked)
-- General software engineering in the context of AI applications${contextBlock}`;
+- General software engineering in the context of AI applications
+
+${dataHandlingPolicy(nonce)}${contextBlock}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -427,15 +445,14 @@ export async function POST(request: NextRequest) {
       isLowConfidence,
     );
 
-    const context = hasResults
-      ? finalResults
-          .map((result) => `[${result.title}](${result.url})\n${result.content.slice(0, 1200)}`)
-          .join("\n\n---\n\n")
-      : "";
+    // Retrieved documentation is delimited with a fresh per-request nonce and
+    // sent at user trust level, never interpolated into the system prompt.
+    const nonce = contextNonce();
+    const contextMessage = renderContextMessage(finalResults, nonce);
 
     const systemPrompt = isLowConfidence
-      ? buildGeneralPrompt(context)
-      : buildSystemPrompt(context);
+      ? buildGeneralPrompt(nonce, hasResults)
+      : buildSystemPrompt(nonce, hasResults);
 
     // Stream response from OpenAI
     const openaiResponse = await fetch(
@@ -456,6 +473,7 @@ export async function POST(request: NextRequest) {
           messages: buildChatMessages({
             systemPrompt,
             history: chatHistory,
+            contextMessage,
             currentMessage: trimmedMessage,
           }),
         }),

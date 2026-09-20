@@ -49,18 +49,29 @@ export function filterPrivateSourceResults<T extends { url: string }>(
   return results.filter((result) => !isPrivateSourceUrl(result.url));
 }
 
+/**
+ * Assembles the request messages.
+ *
+ * `contextMessage` carries retrieved documentation and is sent with the `user`
+ * role, immediately before the question. That placement is the trust boundary:
+ * the system message holds first-party instructions only, so a document can
+ * never speak at instruction level. See lib/prompt-context.ts.
+ */
 export function buildChatMessages({
   systemPrompt,
   history,
+  contextMessage,
   currentMessage,
 }: {
   systemPrompt: string;
   history: ChatHistoryMessage[];
+  contextMessage?: string | null;
   currentMessage: string;
 }): ChatCompletionMessage[] {
   return [
     { role: "system", content: systemPrompt },
     ...history,
+    ...(contextMessage ? [{ role: "user" as const, content: contextMessage }] : []),
     { role: "user", content: currentMessage },
   ];
 }
