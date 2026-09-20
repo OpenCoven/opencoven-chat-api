@@ -138,7 +138,7 @@ cp .env.example .env
 | `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
 | `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
-| `SALEM_ADMIN_PASSWORD`      | Yes, unless named users are configured | Password for the initial admin account |
+| `SALEM_ADMIN_PASSWORD`      | Yes, unless named users are configured | Password for the initial admin account. Legacy: see the note below |
 | `SALEM_ADMIN_USERNAME`      | No       | Initial admin username, defaults to `admin` |
 | `SALEM_USERS_JSON`          | No       | Approved named users with password hashes and optional private research permission |
 | `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` | No | Base64-encoded private research markdown to include in Salem's index |
@@ -149,6 +149,15 @@ cp .env.example .env
 | `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
 
 Authentication variables are server-only. Never expose them through `PUBLIC_` or `NEXT_PUBLIC_` variables. Without a configured admin or approved user list, the interface stays locked.
+
+> **Prefer `SALEM_USERS_JSON` over `SALEM_ADMIN_PASSWORD`.** The admin variable is a
+> legacy path: it is compared as an unsalted single-round SHA-256 of the plaintext,
+> while every account in `SALEM_USERS_JSON` uses PBKDF2-SHA256 at 600,000 iterations.
+> It is also the only account that is granted private-research access unconditionally,
+> so it is simultaneously the highest-privilege credential and the weakest-hashed one.
+> Mint a replacement with `bun run user:hash <id> "<name>"`, add it to
+> `SALEM_USERS_JSON` with `privateSources: true`, then unset `SALEM_ADMIN_PASSWORD`.
+> Removing it invalidates any live session issued against it, which is the intent.
 
 Private research variables are also server-only. If `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` is set, Salem indexes that markdown directly. If `SALEM_PRIVATE_RESEARCH_REPO` and `SALEM_PRIVATE_RESEARCH_PATHS` are set, Salem fetches those private Markdown files through the GitHub Contents API using `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN`.
 
@@ -170,12 +179,29 @@ Runs locally at http://localhost:3000.
 
 | Script                | Description                           |
 | --------------------- | ------------------------------------- |
-| `bun run dev`         | Start development server              |
+| `bun run dev`         | Start development server (port 3000)  |
+| `bun run dev:cave`    | Start development server on port 3001 |
 | `bun run build`       | Build for production                  |
 | `bun run start`       | Start production server               |
-| `bun run test`        | Validate OpenCoven/Salem port wiring  |
+| `bun run typecheck`   | Type-check with `tsc --noEmit`        |
+| `bun run test`        | Run the full offline test suite       |
 | `bun run build:index` | Index documentation into vector store |
+| `bun run user:hash`   | Hash a password for `SALEM_USERS_JSON` |
 | `bun run deploy`      | Deploy to Vercel                      |
+
+### Pre-commit checks
+
+This repository is public, so "no secrets in git" is enforced rather than assumed.
+`bun install` installs [lefthook](https://github.com/evilmartians/lefthook) hooks via
+the `prepare` script:
+
+- **pre-commit** — `gitleaks` on the staged patch, a guard that refuses
+  credential-bearing paths even when force-added past `.gitignore`, and `tsc`.
+- **pre-push** — the test suite.
+
+The same checks run in `.github/workflows/ci.yml`, because `git commit --no-verify`
+skips local hooks. If gitleaks flags a false positive, add a narrow entry to
+`[allowlist]` in `.gitleaks.toml` rather than disabling the hook.
 
 ## Automatic Documentation Updates
 
