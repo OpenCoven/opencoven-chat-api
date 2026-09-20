@@ -257,15 +257,50 @@ export async function fetchPrivateResearchDocs(): Promise<DocPage[]> {
   return pages;
 }
 
+function serializePage(page: DocPage): string {
+  return `# ${page.title}\nSource: ${page.url}\n\n${page.content}`;
+}
+
+/**
+ * Concatenates every source that indexDocs() will index, in a stable order.
+ *
+ * The reindex freshness guard hashes this string and skips the rebuild when the
+ * hash is unchanged, so anything indexed but absent here becomes permanently
+ * stale: the guard keeps reporting "unchanged" while the content drifts. It
+ * must therefore stay in step with indexDocs().
+ *
+ * Coven Code is fetched best-effort, matching indexDocs(). If that fetch fails
+ * the section is omitted, which changes the hash and triggers a rebuild -- the
+ * safe direction to fail, since an unnecessary reindex is recoverable and a
+ * missed one is silent.
+ */
 export async function fetchIndexedSourceText(): Promise<string> {
-  const parts = await Promise.all([
+  const [openCovenText, typeSafeText, covenCodePages] = await Promise.all([
     fetchLlmsFullText(),
     fetchLlmsFullText(TYPESAFE_LLMS_FULL_URL),
+    fetchCovenCodeDocs().catch((error) => {
+      console.warn(
+        `Coven Code docs unavailable while hashing sources; a rebuild will be triggered: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [] as DocPage[];
+    }),
   ]);
-  const privateResearchPages = await fetchPrivateResearchDocs();
 
-  for (const page of privateResearchPages) {
-    parts.push(`# ${page.title}\nSource: ${page.url}\n\n${page.content}`);
+  const parts = [openCovenText, typeSafeText];
+
+  for (const page of covenCodePages) {
+    parts.push(serializePage(page));
+  }
+
+  // Local ./docs/*.md are indexed too, so an edit there must invalidate the hash.
+  for (const page of loadSupplementaryDocs()) {
+    parts.push(serializePage(page));
+  }
+
+  for (const page of await fetchPrivateResearchDocs()) {
+    parts.push(serializePage(page));
   }
 
   return parts.join("\n\n---\n\n");

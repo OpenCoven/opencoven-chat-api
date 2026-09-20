@@ -64,16 +64,27 @@ export class DocsStore {
   }
 
   /**
-   * Drop existing vectors and upsert new chunks.
-   * Used during index rebuild.
+   * Replace the index contents with `chunks`, without an empty window.
+   *
+   * This previously called index.reset() first, which left the index empty from
+   * the start of the rebuild until the final batch landed -- roughly 44s in
+   * production. Live chat during that window retrieved nothing and silently
+   * fell back to the general-knowledge prompt.
+   *
+   * Chunk IDs are deterministic (sha256 of url:index), so instead we upsert the
+   * new set first -- unchanged chunks overwrite themselves in place -- and only
+   * then delete the IDs that are no longer present. Readers always see either
+   * the old or the new content, never nothing. A crash mid-rebuild leaves stale
+   * extra chunks rather than an empty index, which the next run cleans up.
    */
   async replaceAll(chunks: DocsChunk[]): Promise<void> {
-    // Reset the index (delete all vectors)
-    await this.index.reset();
-
     if (chunks.length === 0) {
-      return;
+      // An empty build is treated as a failure upstream; refuse to wipe a good
+      // index on the strength of it.
+      throw new Error("Refusing to replace the index with zero chunks");
     }
+
+    const previousIds = await this.listAllIds();
 
     // Upsert in batches to respect API limits
     for (let i = 0; i < chunks.length; i += UPSERT_BATCH_SIZE) {
@@ -97,6 +108,39 @@ export class DocsStore {
         `Upserted batch ${Math.floor(i / UPSERT_BATCH_SIZE) + 1}/${Math.ceil(chunks.length / UPSERT_BATCH_SIZE)}`,
       );
     }
+
+    const currentIds = new Set(chunks.map((chunk) => chunk.id));
+    const staleIds = previousIds.filter((id) => !currentIds.has(id));
+
+    for (let i = 0; i < staleIds.length; i += UPSERT_BATCH_SIZE) {
+      await this.index.delete(staleIds.slice(i, i + UPSERT_BATCH_SIZE));
+    }
+
+    if (staleIds.length > 0) {
+      console.error(`Removed ${staleIds.length} chunk(s) no longer present in the sources`);
+    }
+  }
+
+  /**
+   * Enumerates every vector ID currently in the index, so a rebuild can work
+   * out which chunks disappeared from the sources.
+   */
+  private async listAllIds(): Promise<string[]> {
+    const ids: string[] = [];
+    let cursor = "0";
+
+    do {
+      const page = await this.index.range({
+        cursor,
+        limit: UPSERT_BATCH_SIZE,
+        includeMetadata: false,
+        includeVectors: false,
+      });
+      ids.push(...page.vectors.map((vector) => String(vector.id)));
+      cursor = page.nextCursor;
+    } while (cursor && cursor !== "0");
+
+    return ids;
   }
 
   /**
