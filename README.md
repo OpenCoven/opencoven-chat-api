@@ -195,6 +195,7 @@ cp .env.example .env
 | `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
 | `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
+| `CRON_SECRET`               | No       | Also accepted by the re-index endpoint, and the only name Vercel Cron sends. Setting it and `REINDEX_SECRET` to *different* values makes the scheduled run authenticate with neither |
 | `SALEM_ADMIN_PASSWORD`      | Yes, unless named users are configured | Admin credential: a `pbkdf2-sha256:600000:...` hash, or a deprecated plaintext password. See the migration note below |
 | `SALEM_ADMIN_USERNAME`      | No       | Initial admin username, defaults to `admin` |
 | `SALEM_ADMIN_PRIVATE_SOURCES` | No     | Set to `true` to grant the admin account private research access. No longer implied |
@@ -204,6 +205,7 @@ cp .env.example .env
 | `SALEM_PRIVATE_RESEARCH_REF` | No | Git ref for private research sources, defaults to `main` |
 | `SALEM_PRIVATE_RESEARCH_PATHS` | No | Comma-separated private research markdown paths |
 | `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN` | No | Server-only token for private GitHub research fetches |
+| `GITHUB_TOKEN` / `GH_TOKEN`  | No      | Read in that order when the token above is unset. A token set for any unrelated purpose is silently used for private research fetches, so prefer the scoped variable and leave these unset |
 
 Authentication variables are server-only. Never expose them through `PUBLIC_` or `NEXT_PUBLIC_` variables. Without a configured admin or approved user list, the interface stays locked.
 
