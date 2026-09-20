@@ -142,7 +142,7 @@ cp .env.example .env
 | `SALEM_ADMIN_USERNAME`      | No       | Initial admin username, defaults to `admin` |
 | `SALEM_USERS_JSON`          | No       | Approved named users with password hashes and optional private research permission |
 | `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` | No | Base64-encoded private research markdown to include in Salem's index |
-| `SALEM_PRIVATE_RESEARCH_REPO` | No | Private GitHub repo for research sources, for example `OpenCoven/coven-research` |
+| `SALEM_PRIVATE_RESEARCH_REPO` | No | Private GitHub repo for research sources, for example `your-org/your-private-research` |
 | `SALEM_PRIVATE_RESEARCH_REF` | No | Git ref for private research sources, defaults to `main` |
 | `SALEM_PRIVATE_RESEARCH_PATHS` | No | Comma-separated private research markdown paths |
 | `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN` | No | Server-only token for private GitHub research fetches |
