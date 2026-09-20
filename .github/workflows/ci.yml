@@ -17,11 +17,19 @@ jobs:
           # Full history so gitleaks can scan every commit in the push, not just the tip.
           fetch-depth: 0
 
+      # The gitleaks CLI is MIT-licensed and free; only the gitleaks-action
+      # wrapper requires a paid licence for organization-owned repos. Run the
+      # binary directly so this needs no secret.
       - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks version
+          ./gitleaks git --redact --no-banner --config .gitleaks.toml .
 
       - uses: oven-sh/setup-bun@v2
         with:
