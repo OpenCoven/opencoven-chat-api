@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { visibilityForUrl, PRIVATE_URL_PREFIX } from "../rag/store-upstash";
+import { visibilityForUrl, publicOnlyFilter, PRIVATE_URL_PREFIX } from "../rag/store-upstash";
 import { filterPrivateSourceResults, isPrivateSourceUrl } from "../app/api/chat/auth";
 
 // Layer 1: visibility is derived from the URL at index time and stored on the
@@ -44,5 +44,17 @@ for (const { url } of results) {
     `visibility disagreement for ${url}`,
   );
 }
+
+// Regression guard. The store filter must key on `url`, which every vector has
+// always carried, not on the `visibility` metadata added later: an equality
+// filter on a field that legacy vectors lack matches nothing, which silently
+// drops retrieval to zero results for every query until a full reindex.
+const filter = publicOnlyFilter();
+assert.ok(filter.includes("url"), "store filter must key on url");
+assert.ok(
+  !/visibility\s*=/.test(filter),
+  "store filter must not depend on the visibility field, which legacy vectors lack",
+);
+assert.ok(filter.includes(PRIVATE_URL_PREFIX), "store filter must exclude the private:// prefix");
 
 console.log("chunk-visibility: ok");

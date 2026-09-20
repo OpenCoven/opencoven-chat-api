@@ -19,6 +19,18 @@ export function visibilityForUrl(url: string): ChunkVisibility {
   return url.startsWith(PRIVATE_URL_PREFIX) ? "private" : "public";
 }
 
+/**
+ * The store-side predicate that keeps private chunks out of a search.
+ *
+ * Deliberately keyed on `url`, not on the `visibility` metadata: vectors
+ * written before `visibility` existed do not carry that field, and an equality
+ * filter on a missing field matches nothing -- which would return zero results
+ * for every query until a full reindex completed.
+ */
+export function publicOnlyFilter(): string {
+  return `url NOT GLOB '${PRIVATE_URL_PREFIX}*'`;
+}
+
 export interface DocsChunk {
   id: string;
   path: string;
@@ -147,10 +159,16 @@ export class DocsStore {
    * Search for similar chunks using vector similarity.
    *
    * `includePrivate` defaults to false so that forgetting to pass it fails
-   * closed. Private chunks are excluded by the store itself via a metadata
-   * filter, so they are never returned to an unprivileged caller in the first
-   * place; the caller-side URL filter in app/api/chat/auth.ts remains as a
-   * second, independent layer.
+   * closed. Private chunks are excluded by the store itself, so they are never
+   * returned to an unprivileged caller in the first place; the caller-side URL
+   * filter in app/api/chat/auth.ts remains as a second, independent layer.
+   *
+   * The filter matches on `url` rather than the `visibility` metadata added
+   * alongside it. Every vector has always carried a url, so this also excludes
+   * private chunks written before `visibility` existed -- filtering on
+   * `visibility = 'public'` would silently match nothing until a full reindex
+   * and drop the index to zero results. It is also the exact predicate used by
+   * isPrivateSourceUrl(), so the two layers cannot drift apart.
    */
   async search(
     vector: number[],
@@ -162,7 +180,7 @@ export class DocsStore {
       topK: limit,
       includeMetadata: true,
       includeVectors: false,
-      ...(includePrivate ? {} : { filter: "visibility = 'public'" }),
+      ...(includePrivate ? {} : { filter: publicOnlyFilter() }),
     });
 
     return results.map((result) => {
