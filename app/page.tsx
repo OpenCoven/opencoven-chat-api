@@ -1,4 +1,8 @@
 import Image from "next/image";
+import { cookies } from "next/headers";
+import SignInForm from "@/app/components/sign-in-form";
+import { accessConfigured, SESSION_COOKIE } from "@/lib/access";
+import { userFromToken } from "@/lib/session-http";
 import { DocsStore } from "@/rag/store-upstash";
 import ChatForm from "@/app/components/chat-form";
 
@@ -13,7 +17,13 @@ async function getStatus() {
 }
 
 export default async function Home() {
-  const status = await getStatus();
+  let user = null;
+  let configured = false;
+  try {
+    configured = accessConfigured();
+    user = await userFromToken((await cookies()).get(SESSION_COOKIE)?.value);
+  } catch { configured = false; }
+  const status = user ? await getStatus() : null;
   return (
     <div className="container">
       <header className="hero-header">
@@ -34,7 +44,7 @@ export default async function Home() {
         <span className="hero-badge">OpenCoven</span>
       </header>
 
-      <div className="status-bar">
+      {status && <div className="status-bar">
         <div className="status-item">
           <div className={`status-dot ${status.ok ? "online" : "offline"}`} />
           <span className="status-value">{status.ok ? "Online" : "Offline"}</span>
@@ -43,14 +53,14 @@ export default async function Home() {
           <span className="status-label">Indexed</span>
           <span className="status-value">{status.chunks.toLocaleString()} chunks</span>
         </div>
-      </div>
+      </div>}
 
       <div className="glass-card chat-section">
         <div className="chat-header">
-          <h2>Ask a Question</h2>
+          <h2>{user ? "Your conversations" : "Sign in to Salem"}</h2>
         </div>
         <div className="chat-body">
-          <ChatForm />
+          {user ? <ChatForm user={user} /> : <SignInForm configured={configured} />}
         </div>
       </div>
 

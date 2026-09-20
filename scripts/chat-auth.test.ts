@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildChatMessages,
-  canAccessPrivateSources,
   filterPrivateSourceResults,
-  getFollowupAuthStatus,
   isPrivateSourceUrl,
   normalizeChatHistory,
 } from "../app/api/chat/auth";
@@ -33,18 +31,6 @@ try {
   ]);
   assert.equal(normalized.length, 3);
   assert.equal(normalized[2].content.length, 2000);
-
-  delete process.env.SALEM_ADMIN_PASSWORD;
-  assert.equal(getFollowupAuthStatus([], null), "not-required");
-  assert.equal(getFollowupAuthStatus(normalized, "anything"), "not-configured");
-
-  process.env.SALEM_ADMIN_PASSWORD = "secret-salem";
-  assert.equal(getFollowupAuthStatus(normalized, null), "unauthorized");
-  assert.equal(getFollowupAuthStatus(normalized, "wrong"), "unauthorized");
-  assert.equal(getFollowupAuthStatus(normalized, "secret-salem"), "authorized");
-  assert.equal(canAccessPrivateSources(null), false);
-  assert.equal(canAccessPrivateSources("wrong"), false);
-  assert.equal(canAccessPrivateSources("secret-salem"), true);
 
   assert.equal(isPrivateSourceUrl("private://opencoven/research/inline"), true);
   assert.equal(isPrivateSourceUrl("https://docs.opencoven.ai/docs/reference"), false);

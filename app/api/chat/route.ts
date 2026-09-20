@@ -14,13 +14,17 @@ import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
 import { getReranker, type RerankResult } from "@/rag/reranker";
 import {
   buildChatMessages,
-  canAccessPrivateSources,
   filterPrivateSourceResults,
-  getFollowupAuthStatus,
   normalizeChatHistory,
 } from "./auth";
 
-export const runtime = "edge";
+import { requestUser, sameOrigin } from "@/lib/session-http";
+import { ChatHistoryStore, type SavedChat } from "@/lib/chat-history";
+import { RedisStorage } from "@/lib/storage";
+import { savedChatStream } from "@/lib/chat-stream";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const MAX_MESSAGE_LENGTH = 2000;
 const ENABLE_HYBRID = process.env.ENABLE_HYBRID_SEARCH === "true";
@@ -48,7 +52,7 @@ function getCorsHeaders(request: Request) {
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Salem-Admin-Password",
+    "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Expose-Headers": "X-Query-Id, X-Best-Score, X-Threshold, X-Low-Confidence, X-Result-Count, X-Strategy, X-Intent, X-Retrieval-Ms, X-Rerank-Ms, X-Relevance-Rank",
     "Vary": "Origin",
   };
@@ -72,6 +76,7 @@ function jsonResponse(
     status,
     headers: {
       "Content-Type": "application/json",
+      "Cache-Control": "private, no-store",
       ...getCorsHeaders(request),
       ...headers,
     },
@@ -144,8 +149,12 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let retrievalMs = 0;
   let rerankMs = 0;
+  let releaseLock: (() => Promise<void>) | undefined;
 
   try {
+    const user = await requestUser(request);
+    if (!user) return jsonResponse(request, { error: "Sign in required", status: 401 }, 401);
+    if (!sameOrigin(request)) return jsonResponse(request, { error: "Request origin is not allowed", status: 403 }, 403);
     // Rate limiting
     const headersObj: Record<string, string> = {};
     request.headers.forEach((value, key) => {
@@ -176,7 +185,7 @@ export async function POST(request: NextRequest) {
     // Parse body
     let message = "";
     let chatHistory = normalizeChatHistory(null);
-    let followupPassword: string | null = null;
+    let chatId: string | null = null;
     const ALLOWED_MODELS = [
       "gpt-5-nano",
       "gpt-5-mini",
@@ -197,8 +206,10 @@ export async function POST(request: NextRequest) {
     try {
       const body = await request.json();
       message = body?.message;
-      chatHistory = normalizeChatHistory(body?.history);
-      followupPassword = request.headers.get("X-Salem-Admin-Password");
+      if (body?.chatId !== undefined && body.chatId !== null) {
+        if (typeof body.chatId !== "string") throw new Error("Invalid chat ID");
+        chatId = body.chatId;
+      }
       if (
         body?.model &&
         typeof body.model === "string" &&
@@ -248,35 +259,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const followupAuthStatus = getFollowupAuthStatus(
-      chatHistory,
-      followupPassword,
-    );
-
-    if (followupAuthStatus === "not-configured") {
-      return jsonResponse(
-        request,
-        {
-          error: "Follow-up access is not configured",
-          status: 503,
-        },
-        503,
-        rateLimitHeaders
-      );
-    }
-
-    if (followupAuthStatus === "unauthorized") {
-      return jsonResponse(
-        request,
-        {
-          error: "Password required for follow-up conversations",
-          status: 401,
-        },
-        401,
-        rateLimitHeaders
-      );
-    }
-
     if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
       return jsonResponse(
         request,
@@ -299,6 +281,21 @@ export async function POST(request: NextRequest) {
         rateLimitHeaders
       );
     }
+
+    const historyStore = new ChatHistoryStore(new RedisStorage());
+    const lock = await historyStore.lock(user.id);
+    if (!lock) return jsonResponse(request, { error: "A reply is already in progress. Wait for it to finish.", status: 409 }, 409);
+    releaseLock = () => historyStore.unlock(user.id, lock);
+    let conversation: SavedChat | null = null;
+    if (chatId) {
+      conversation = await historyStore.get(user.id, chatId);
+      if (!conversation) return jsonResponse(request, { error: "Chat not found", status: 404 }, 404);
+    }
+    // Only stored, account-scoped messages are accepted as conversation history.
+    chatHistory = normalizeChatHistory(conversation?.messages);
+    const savedConversation: SavedChat = conversation ?? {
+      id: crypto.randomUUID(), title: trimmedMessage.slice(0, 80), updatedAt: new Date().toISOString(), messages: [],
+    };
 
     // Classify query for optimal retrieval strategy
     const classified: ClassifiedQuery = classifyQuery(trimmedMessage);
@@ -452,7 +449,7 @@ export async function POST(request: NextRequest) {
 
     finalResults = filterPrivateSourceResults(
       finalResults,
-      canAccessPrivateSources(followupPassword),
+      user.privateSources,
     );
     topScores = finalResults.map((r) => r.score);
 
@@ -486,6 +483,7 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${openaiKey}`,
         },
+        signal: AbortSignal.timeout(90_000),
         body: JSON.stringify({
           model,
           stream: true,
@@ -507,63 +505,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create a TransformStream to process SSE data
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-
-    let buffer = "";
-
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
-        buffer += decoder.decode(chunk, { stream: true });
-        const lines = buffer.split("\n");
-
-        // Keep the last (potentially incomplete) line in the buffer
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const data = trimmed.slice(5).trim();
-          if (data === "[DONE]") return;
-
-          try {
-            const json = JSON.parse(data);
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) {
-              controller.enqueue(encoder.encode(delta));
-            }
-          } catch {
-            // Ignore malformed SSE lines
-          }
-        }
-      },
-      flush() {
-        // Process any remaining buffered data on stream end
-        if (buffer.trim().startsWith("data:")) {
-          const data = buffer.trim().slice(5).trim();
-          if (data && data !== "[DONE]") {
-            try {
-              const json = JSON.parse(data);
-              const delta = json.choices?.[0]?.delta?.content;
-              if (delta) {
-                encoder.encode(delta);
-              }
-            } catch {
-              // Ignore
-            }
-          }
-        }
-      },
-    });
-
-    // Pipe the OpenAI response through our transform
-    const readable = openaiResponse.body.pipeThrough(transformStream);
+    const unlock = releaseLock;
+    const readable = savedChatStream(openaiResponse.body, async (answer) => {
+      await historyStore.save(user.id, savedConversation, [
+        ...savedConversation.messages,
+        { role: "user", content: trimmedMessage },
+        { role: "assistant", content: answer },
+      ]);
+    }, unlock);
+    // Streaming now owns lock cleanup, including errors and client cancellation.
+    releaseLock = undefined;
 
     return new Response(readable, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Transfer-Encoding": "chunked",
+        "Cache-Control": "private, no-store",
+        "X-Chat-Id": savedConversation.id,
         ...getCorsHeaders(request),
         ...rateLimitHeaders,
         "X-Query-Id": queryId,
@@ -580,7 +537,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[Error]", error);
-    return jsonResponse(request, { error: "Internal Server Error", status: 500 }, 500);
+    return jsonResponse(request, { error: "Unable to process this chat. Please try again.", status: 503 }, 503);
+  } finally {
+    if (releaseLock) await releaseLock();
   }
 }
 

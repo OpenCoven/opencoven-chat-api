@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BlockRenderer, useMarkdown } from "@create-markdown/react";
+import type { SalemUser } from "@/lib/access";
+import type { ChatSummary, SavedChat } from "@/lib/chat-history";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const DEFAULT_MODEL = "gpt-5.2" as const;
@@ -104,13 +106,81 @@ function AssistantMessage({
   );
 }
 
-export default function ChatForm() {
+export default function ChatForm({ user }: { user: SalemUser }) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [password, setPassword] = useState("");
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [recentChats, setRecentChats] = useState<ChatSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [formError, setFormError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
+
+  const lockInterface = useCallback(() => {
+    setMessages([]);
+    setMessage("");
+    setRecentChats([]);
+    setIsLoading(true);
+    window.location.replace("/");
+  }, []);
+
+  const loadRecentChats = useCallback(async () => {
+    const response = await fetch("/api/chats", { cache: "no-store" });
+    if (response.status === 401) { lockInterface(); return; }
+    if (!response.ok) throw new Error("Unable to load recent chats. Please refresh to retry.");
+    const body = await response.json();
+    setRecentChats(body.chats);
+  }, [lockInterface]);
+
+  useEffect(() => {
+    loadRecentChats().catch((error) => setFormError(error.message)).finally(() => setHistoryLoading(false));
+    const checkSession = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const response = await fetch("/api/session", { cache: "no-store" });
+        if (response.status === 401) lockInterface();
+      } catch { /* Requests still enforce authentication when the connection returns. */ }
+    };
+    const timer = setInterval(checkSession, 60_000);
+    window.addEventListener("focus", checkSession);
+    window.addEventListener("pageshow", checkSession);
+    document.addEventListener("visibilitychange", checkSession);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", checkSession);
+      window.removeEventListener("pageshow", checkSession);
+      document.removeEventListener("visibilitychange", checkSession);
+    };
+  }, [loadRecentChats, lockInterface]);
+
+  const openChat = async (id: string) => {
+    if (isLoading || historyLoading) return;
+    setHistoryLoading(true);
+    setFormError("");
+    try {
+      const response = await fetch(`/api/chats/${encodeURIComponent(id)}`, { cache: "no-store" });
+      if (response.status === 401) { lockInterface(); return; }
+      if (!response.ok) throw new Error("Unable to open this chat. It may have expired.");
+      const { chat }: { chat: SavedChat } = await response.json();
+      setChatId(chat.id);
+      setMessages(chat.messages);
+      setMessage("");
+    } catch (error) { setFormError(error instanceof Error ? error.message : "Unable to open chat"); }
+    finally { setHistoryLoading(false); }
+  };
+
+  const signOut = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/session", { method: "DELETE" });
+      if (!response.ok) throw new Error("Unable to sign out. Please try again.");
+      lockInterface();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unable to sign out");
+      setIsLoading(false);
+    }
+  };
 
   const copyText = useCallback(async (text: string) => {
     try {
@@ -142,14 +212,7 @@ export default function ChatForm() {
     event.preventDefault();
 
     const trimmedMessage = message.trim();
-    const trimmedPassword = password.trim();
-    const isFollowup = messages.length > 0;
-
-    if (!trimmedMessage || isLoading) return;
-    if (isFollowup && !trimmedPassword) {
-      setFormError("Follow-up password required.");
-      return;
-    }
+    if (!trimmedMessage || isLoading || historyLoading) return;
 
     const history = messages;
     const pendingMessages: ChatMessage[] = [
@@ -168,21 +231,18 @@ export default function ChatForm() {
         "Content-Type": "application/json",
       };
 
-      if (isFollowup) {
-        headers["X-Salem-Admin-Password"] = trimmedPassword;
-      }
-
       const response = await fetch("/api/chat", {
         method: "POST",
         headers,
         body: JSON.stringify({
           message: trimmedMessage,
-          history: history,
+          chatId,
           model: DEFAULT_MODEL,
           retrieval: "auto",
         }),
       });
 
+      if (response.status === 401) { lockInterface(); return; }
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setMessages(history);
@@ -193,8 +253,7 @@ export default function ChatForm() {
 
       const reader = response.body?.getReader();
       if (!reader) {
-        updateStreamingAnswer("Error: No response body");
-        return;
+        throw new Error("No response body");
       }
 
       const decoder = new TextDecoder();
@@ -207,10 +266,14 @@ export default function ChatForm() {
         text += decoder.decode(value, { stream: true });
         updateStreamingAnswer(text);
       }
-    } catch (error) {
-      updateStreamingAnswer(
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      text += decoder.decode();
+      updateStreamingAnswer(text);
+      setChatId(response.headers.get("X-Chat-Id"));
+      await loadRecentChats().catch(() => setFormError("Your reply was saved, but recent chats could not be refreshed. Reload to see them."));
+    } catch {
+      setFormError("The reply was interrupted or could not be saved. Reopen the chat to check saved messages before retrying.");
+      setMessages(history);
+      setMessage(trimmedMessage);
     } finally {
       setIsLoading(false);
     }
@@ -222,10 +285,30 @@ export default function ChatForm() {
   }, [messages]);
 
   const hasConversation = messages.length > 0;
-  const needsPassword = hasConversation;
+  const busy = isLoading || historyLoading;
 
   return (
     <>
+      <div className="account-toolbar">
+        <span>Signed in as <strong>{user.name}</strong> <span className="account-id">({user.id})</span></span>
+        <button type="button" className="secondary-btn" disabled={isLoading} onClick={signOut}>Sign out</button>
+      </div>
+      <section className="recent-chats" aria-labelledby="recent-chats-title" aria-busy={historyLoading}>
+        <div className="recent-chats-header">
+          <h3 id="recent-chats-title">Recent chats</h3>
+          <button type="button" className="secondary-btn" disabled={busy} onClick={() => { setChatId(null); setMessages([]); setMessage(""); setFormError(""); }}>New chat</button>
+        </div>
+        {historyLoading && <p className="history-note" role="status">Loading chats…</p>}
+        {!historyLoading && recentChats.length === 0 && <p className="history-note">Your saved conversations will appear here.</p>}
+        {recentChats.length > 0 && <ul className="recent-chat-list">
+          {recentChats.map((chat) => <li key={chat.id}>
+            <button type="button" className="recent-chat" aria-current={chatId === chat.id ? "true" : undefined} disabled={busy} onClick={() => openChat(chat.id)}>
+              <span>{chat.title}</span><time dateTime={chat.updatedAt}>{new Date(chat.updatedAt).toLocaleDateString()}</time>
+            </button>
+          </li>)}
+        </ul>}
+        <p className="history-note">Keeps your latest 20 chats for 30 days, with up to 40 messages per chat.</p>
+      </section>
       {hasConversation && (
         <div
           ref={conversationRef}
@@ -252,19 +335,6 @@ export default function ChatForm() {
       )}
 
       <form className="chat-form" onSubmit={handleSubmit}>
-        {needsPassword && (
-          <label className="password-field">
-            <span>Follow-up password</span>
-            <input
-              type="password"
-              className="chat-input password-input"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-        )}
         <div className="question-row">
           <input
             type="text"
@@ -277,10 +347,12 @@ export default function ChatForm() {
             maxLength={MAX_MESSAGE_LENGTH}
             autoComplete="off"
             required
+            aria-label="Message to Salem"
+            disabled={busy}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
           />
-          <button type="submit" className="chat-btn" disabled={isLoading}>
+          <button type="submit" className="chat-btn" disabled={busy}>
             {isLoading ? (
               "Asking Salem..."
             ) : (
@@ -291,7 +363,7 @@ export default function ChatForm() {
             )}
           </button>
         </div>
-        {formError && <p className="form-error">{formError}</p>}
+        {formError && <p className="form-error" role="alert">{formError}</p>}
       </form>
     </>
   );

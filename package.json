@@ -18,9 +18,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node scripts/validate-opencoven-port.mjs && bun scripts/embeddings.test.ts && bun scripts/private-research-sources.test.ts && bun scripts/typesafe-source.test.ts && bun scripts/reindex-freshness.test.ts && bun scripts/reindex-route.test.ts && bun scripts/chat-auth.test.ts && bun scripts/chat-route-auth.test.ts && node scripts/chat-form-followup.test.mjs",
+    "test": "node scripts/validate-opencoven-port.mjs && bun scripts/embeddings.test.ts && bun scripts/private-research-sources.test.ts && bun scripts/typesafe-source.test.ts && bun scripts/reindex-freshness.test.ts && bun scripts/reindex-route.test.ts && bun scripts/chat-auth.test.ts && bun scripts/chat-route-auth.test.ts && bun scripts/chat-access.test.ts && bun scripts/session-history.test.ts && bun scripts/chat-stream.test.ts",
     "build:index": "bun scripts/build-vector-index.ts",
-    "deploy": "vercel"
+    "deploy": "vercel",
+    "user:hash": "bun scripts/create-user.ts"
   },
   "dependencies": {
     "@create-markdown/core": "^2.0.0",

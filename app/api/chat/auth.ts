@@ -8,12 +8,6 @@ export type ChatCompletionMessage = {
   content: string;
 };
 
-export type FollowupAuthStatus =
-  | "not-required"
-  | "not-configured"
-  | "unauthorized"
-  | "authorized";
-
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_HISTORY_MESSAGE_LENGTH = 2000;
 
@@ -41,23 +35,6 @@ export function normalizeChatHistory(input: unknown): ChatHistoryMessage[] {
   }
 
   return messages.slice(-MAX_HISTORY_MESSAGES);
-}
-
-export function getFollowupAuthStatus(
-  history: ChatHistoryMessage[],
-  submittedPassword: string | null,
-): FollowupAuthStatus {
-  if (history.length === 0) return "not-required";
-
-  const configuredPassword = process.env.SALEM_ADMIN_PASSWORD;
-  if (!configuredPassword) return "not-configured";
-
-  return submittedPassword === configuredPassword ? "authorized" : "unauthorized";
-}
-
-export function canAccessPrivateSources(submittedPassword: string | null): boolean {
-  const configuredPassword = process.env.SALEM_ADMIN_PASSWORD;
-  return Boolean(configuredPassword && submittedPassword === configuredPassword);
 }
 
 export function isPrivateSourceUrl(url: string): boolean {

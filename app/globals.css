@@ -685,3 +685,57 @@ footer {
     display: none;
   }
 }
+
+.access-description, .history-note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.sign-in-form { max-width: 420px; }
+.sign-in-form .password-field { max-width: none; }
+.sign-in-form .chat-btn { justify-content: center; }
+.account-toolbar, .recent-chats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.account-toolbar { margin-bottom: 1.5rem; font-size: 0.8rem; color: var(--text-secondary); }
+.account-id { color: var(--text-muted); }
+.secondary-btn {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.secondary-btn:hover, .recent-chat:hover { background: var(--glass-hover); }
+.secondary-btn:disabled, .recent-chat:disabled { opacity: 0.5; cursor: wait; }
+.secondary-btn:focus-visible, .recent-chat:focus-visible, .chat-btn:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 3px; }
+.recent-chats { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--glass-border); }
+.recent-chats h3 { font-size: 0.9rem; font-weight: 500; }
+.recent-chat-list { list-style: none; margin: 0.75rem 0; padding: 0; max-height: 220px; overflow-y: auto; }
+.recent-chat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.recent-chat[aria-current="true"] { border-color: var(--glass-border); background: var(--glass-hover); color: var(--text-primary); }
+.recent-chat span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.recent-chat time { color: var(--text-muted); font-size: 0.7rem; flex-shrink: 0; }
+.history-note { margin-top: 0.5rem; font-size: 0.75rem; }

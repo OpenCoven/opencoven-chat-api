@@ -25,16 +25,62 @@ Authorized deployments can also index private OpenCoven research from server-onl
 - **AI**: OpenAI for chat completions, Gemini for embeddings, optional Cohere reranking
 - **Language**: TypeScript
 
+## Access and recent chats
+
+Salem requires sign-in before showing the chat interface or accepting any question.
+The existing `SALEM_ADMIN_PASSWORD` signs in to the `admin` account (override its
+username with `SALEM_ADMIN_USERNAME`). The former public first-question access and
+`X-Salem-Admin-Password` API header are no longer supported.
+
+Additional users must be explicitly provisioned in the server-only
+`SALEM_USERS_JSON` environment variable. There is no public registration. Each user
+has a unique lowercase ID and individual password; users can only view and
+continue their own conversations. Do not share accounts or reuse a departed
+user's ID for someone else.
+
+To create a user entry, pipe a password of at least 12 characters from a password
+manager into `bun run user:hash alice "Alice"`. The command reads stdin without
+printing the password and outputs an entry containing a salted password hash.
+Collect approved entries in a JSON array and set `SALEM_USERS_JSON` in Vercel:
+
+```json
+[{"id":"alice","name":"Alice","passwordHash":"<generated hash>","privateSources":false}]
+```
+
+Set `privateSources` to `true` only for users permitted to access private research.
+The initial admin account retains private research access. Removing a user or
+changing their password or private-source permission invalidates existing sessions.
+Deploy the environment changes to apply them.
+
+Sessions use an HttpOnly, SameSite=Strict cookie (Secure in production), expire
+after 12 hours, and are revoked on sign-out. Redis is required for sessions and
+history; storage failures never allow anonymous access. Login attempts are limited
+to 10 per IP per 15 minutes.
+
+Recent chats are stored in Redis under the authenticated user, retaining the latest
+20 conversations, up to 40 messages each, for 30 days after the last completed
+reply. Reopen a recent chat to continue it, or choose **New chat**. Interrupted or
+unsaved replies produce an error and are not added to the saved conversation.
+Chats from before this feature cannot be recovered because they were not stored.
+
 ## API Endpoints
 
 | Endpoint              | Method | Description                               |
 | --------------------- | ------ | ----------------------------------------- |
-| `/api/chat`           | POST   | Send a question, get a streaming response |
+| `/api/session`        | POST / GET / DELETE | Sign in, inspect session, or sign out |
+| `/api/chats`          | GET    | List the signed-in user's recent chats |
+| `/api/chats/[id]`     | GET    | Read one of the signed-in user's chats |
+| `/api/chat`           | POST   | Ask a question using an authenticated session |
 | `/api/health`         | GET    | Health check                              |
 | `/api/webhook`        | POST   | GitHub docs webhook for re-indexing       |
 | `/api/cron/reindex`   | POST   | Protected scheduled re-index safety net   |
 
 ### POST /api/chat
+
+First sign in through `/api/session` with `{ "username": "admin", "password": "..." }`
+and retain the session cookie. Send `chatId` to continue a saved conversation;
+omit it to start a new one. The API returns the ID in `X-Chat-Id` and loads prior
+messages from storage. Caller-supplied user IDs and message history are ignored.
 
 ```json
 {
@@ -92,7 +138,9 @@ cp .env.example .env
 | `COHERE_API_KEY`            | No       | Cohere key for reranking                         |
 | `GITHUB_WEBHOOK_SECRET`     | No       | Secret for GitHub webhook                        |
 | `REINDEX_SECRET`            | No       | Secret for scheduled re-index endpoint           |
-| `SALEM_ADMIN_PASSWORD`      | No       | Server-only password required for follow-up conversations after the first website question |
+| `SALEM_ADMIN_PASSWORD`      | Yes, unless named users are configured | Password for the initial admin account |
+| `SALEM_ADMIN_USERNAME`      | No       | Initial admin username, defaults to `admin` |
+| `SALEM_USERS_JSON`          | No       | Approved named users with password hashes and optional private research permission |
 | `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` | No | Base64-encoded private research markdown to include in Salem's index |
 | `SALEM_PRIVATE_RESEARCH_REPO` | No | Private GitHub repo for research sources, for example `OpenCoven/coven-research` |
 | `SALEM_PRIVATE_RESEARCH_REF` | No | Git ref for private research sources, defaults to `main` |
@@ -100,7 +148,7 @@ cp .env.example .env
 | `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN` | No | Server-only token for private GitHub research fetches |
 | `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
 
-`SALEM_ADMIN_PASSWORD` is intentionally not exposed through any `PUBLIC_` or `NEXT_PUBLIC_` variable. Follow-up requests fail closed when this env var is missing; there is no fallback password.
+Authentication variables are server-only. Never expose them through `PUBLIC_` or `NEXT_PUBLIC_` variables. Without a configured admin or approved user list, the interface stays locked.
 
 Private research variables are also server-only. If `SALEM_PRIVATE_RESEARCH_DOCS_BASE64` is set, Salem indexes that markdown directly. If `SALEM_PRIVATE_RESEARCH_REPO` and `SALEM_PRIVATE_RESEARCH_PATHS` are set, Salem fetches those private Markdown files through the GitHub Contents API using `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN`.
 
