@@ -95,9 +95,22 @@ async function fetchLlmsFullText(url: string = LLMS_FULL_URL): Promise<string> {
   return await response.text();
 }
 
+/**
+ * Parses an llms-full.txt feed into pages, binding each page to the host the
+ * feed was fetched from.
+ *
+ * The citation URL of a page comes from a `Source:` line inside the fetched
+ * text, which is content the feed's publisher controls. Unbound, a third-party
+ * feed could declare `Source: https://docs.opencoven.ai/anything` and have its
+ * chunks indexed -- and later cited -- as first-party OpenCoven documentation,
+ * which would defeat the provenance labelling in lib/prompt-context.ts and let
+ * an external source put arbitrary links in front of users under an OpenCoven
+ * URL. A page that claims a host other than its feed's is dropped.
+ */
 async function fetchDocsFromLlmsTxt(url: string = LLMS_FULL_URL): Promise<DocPage[]> {
   console.log(`Fetching documentation from ${url}...`);
 
+  const feedHost = new URL(url).hostname.toLowerCase();
   const content = await fetchLlmsFullText(url);
   const pages: DocPage[] = [];
 
@@ -120,10 +133,22 @@ async function fetchDocsFromLlmsTxt(url: string = LLMS_FULL_URL): Promise<DocPag
     // Extract source URL
     const sourceMatch = section.match(/\nSource: (https?:\/\/[^\n]+)/);
     if (!sourceMatch) continue;
-    const url = sourceMatch[1].trim();
+    const sourceUrl = sourceMatch[1].trim();
 
     // Extract path from URL
-    const urlObj = new URL(url);
+    let urlObj: URL;
+    try {
+      urlObj = new URL(sourceUrl);
+    } catch {
+      console.warn(`Skipping ${title}: unparseable Source URL ${sourceUrl}`);
+      continue;
+    }
+    if (urlObj.hostname.toLowerCase() !== feedHost) {
+      console.warn(
+        `Skipping ${title}: declared Source ${sourceUrl} does not belong to ${feedHost}, the host that served this feed`,
+      );
+      continue;
+    }
     const path = urlObj.pathname;
 
     // Extract content (everything after the Source line)
@@ -141,7 +166,7 @@ async function fetchDocsFromLlmsTxt(url: string = LLMS_FULL_URL): Promise<DocPag
       continue;
     }
 
-    pages.push({ url, path, title, content: pageContent });
+    pages.push({ url: sourceUrl, path, title, content: pageContent });
   }
 
   console.log(`Parsed ${pages.length} documentation pages from llms-full.txt`);
@@ -412,6 +437,11 @@ function loadSupplementaryDocs(): DocPage[] {
     return pages;
   }
 
+  // Unlike a fetched feed, these files are not bound to a host: they live in
+  // this repository and reach it through review, so the `Source:` URL they
+  // declare is a first-party choice. Their provenance is still derived from
+  // that URL at prompt time, so a file naming an external host is labelled
+  // external like any other.
   for (const file of files) {
     const content = readFileSync(join(SUPPLEMENTARY_DIR, file), "utf-8");
     assertNotPrivateSupplementaryDoc(file, content);
