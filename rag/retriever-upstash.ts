@@ -20,13 +20,20 @@ export class Retriever {
    * Retrieve relevant chunks using hybrid scoring:
    * - Primary: vector similarity search
    * - Secondary: keyword boost for exact term matches
+   *
+   * `includePrivate` must come from the caller's session. It defaults to false
+   * so an omitted argument excludes private research rather than exposing it.
    */
-  async retrieve(query: string, limit: number = 8): Promise<RetrievalResult[]> {
+  async retrieve(
+    query: string,
+    limit: number = 8,
+    includePrivate: boolean = false,
+  ): Promise<RetrievalResult[]> {
     // Generate query embedding
     const queryVector = await this.embeddings.embed(query);
 
     // Over-fetch for reranking (2x limit)
-    const searchResults = await this.store.search(queryVector, limit * 2);
+    const searchResults = await this.store.search(queryVector, limit * 2, includePrivate);
 
     if (searchResults.length === 0) {
       return [];
@@ -48,6 +55,7 @@ export class Retriever {
         title: item.chunk.title,
         content: item.chunk.content,
         url: item.chunk.url,
+        visibility: item.chunk.visibility,
       },
       score: item.score,
     }));

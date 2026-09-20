@@ -19,6 +19,25 @@ type AssistantMessageProps = {
   isStreaming: boolean;
 };
 
+
+const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+
+/**
+ * Allowlists the schemes a rendered markdown link may use. Relative and
+ * fragment hrefs resolve against the page origin and stay allowed; anything
+ * that parses to another scheme (javascript:, data:, vbscript:, blob:) does not.
+ */
+function isSafeHref(href: string | null): boolean {
+  if (!href) return false;
+  const trimmed = href.trim();
+  if (!trimmed) return false;
+  try {
+    return SAFE_LINK_SCHEMES.has(new URL(trimmed, window.location.origin).protocol);
+  } catch {
+    return false;
+  }
+}
+
 function AssistantMessage({
   content,
   copyText,
@@ -71,6 +90,17 @@ function AssistantMessage({
     });
 
     container.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((anchor) => {
+      // The markdown renderer passes link URLs through verbatim, so the scheme is
+      // whatever the model emitted. Retrieved doc content reaches the model from
+      // third-party sources, which makes a javascript:/data: href an injection
+      // path rather than merely self-XSS. Neutralise anything that is not a
+      // plain navigable link before the anchor becomes clickable.
+      if (!isSafeHref(anchor.getAttribute("href"))) {
+        anchor.removeAttribute("href");
+        anchor.removeAttribute("target");
+        anchor.dataset.blockedLink = "true";
+        return;
+      }
       if (anchor.target) return;
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";

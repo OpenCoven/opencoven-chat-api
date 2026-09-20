@@ -9,9 +9,24 @@ import { timingSafeEqual } from "node:crypto";
 import { reindexDocsIfChanged } from "@/rag/reindex-freshness";
 
 export const runtime = "nodejs";
+// A full rebuild measured ~44s on 2026-09-20; the platform default of 60s
+// leaves almost no headroom as the corpus grows.
+export const maxDuration = 300;
 
-function getConfiguredSecret(): string | null {
-  return process.env.REINDEX_SECRET || process.env.CRON_SECRET || null;
+/**
+ * Accepts either secret name. Vercel Cron only ever sends CRON_SECRET, while the
+ * README and .env.example document REINDEX_SECRET; preferring one over the other
+ * meant a deployment that set both to different values would fail authorization
+ * on the scheduled run and, before this change, report success anyway.
+ */
+function getConfiguredSecrets(): string[] {
+  return [process.env.REINDEX_SECRET, process.env.CRON_SECRET]
+    .map((secret) => secret?.trim())
+    .filter((secret): secret is string => Boolean(secret));
+}
+
+function isReindexConfigured(): boolean {
+  return getConfiguredSecrets().length > 0;
 }
 
 function getRequestSecret(request: NextRequest): string | null {
@@ -30,9 +45,10 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 export function isAuthorizedReindexRequest(request: NextRequest): boolean {
-  const configured = getConfiguredSecret();
   const provided = getRequestSecret(request);
-  return Boolean(configured && provided && constantTimeEqual(configured, provided));
+  if (!provided) return false;
+  // Compare against every configured secret so neither name is second-class.
+  return getConfiguredSecrets().some((configured) => constantTimeEqual(configured, provided));
 }
 
 /**
@@ -78,23 +94,28 @@ async function runReindex(request: NextRequest): Promise<NextResponse> {
 
 /**
  * Vercel Cron triggers this endpoint with a GET carrying
- * `Authorization: Bearer ${CRON_SECRET}`. When the request is authorized we
- * run the reindex; otherwise we return a plain (unauthenticated) status check.
+ * `Authorization: Bearer ${CRON_SECRET}`. Authorized requests run the reindex;
+ * everything else is rejected. There is no anonymous status view.
  */
 export async function GET(request: NextRequest) {
-  if (getConfiguredSecret() && isAuthorizedReindexRequest(request)) {
-    return runReindex(request);
+  if (!isReindexConfigured()) {
+    return NextResponse.json(
+      { status: "error", error: "REINDEX_SECRET or CRON_SECRET is not configured" },
+      { status: 500 },
+    );
   }
 
-  return NextResponse.json({
-    status: "ok",
-    endpoint: "scheduled docs reindex",
-    configured: Boolean(getConfiguredSecret()),
-  });
+  if (!isAuthorizedReindexRequest(request)) {
+    // Previously returned 200 with `configured`, which told any anonymous caller
+    // whether a reindex secret was set. Nothing about this endpoint is public.
+    return NextResponse.json({ status: "error", error: "Unauthorized" }, { status: 401 });
+  }
+
+  return runReindex(request);
 }
 
 export async function POST(request: NextRequest) {
-  if (!getConfiguredSecret()) {
+  if (!isReindexConfigured()) {
     return NextResponse.json(
       { status: "error", error: "REINDEX_SECRET or CRON_SECRET is not configured" },
       { status: 500 },

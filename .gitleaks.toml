@@ -1,0 +1,28 @@
+# gitleaks configuration for opencoven-chat-api
+#
+# This repo is public. Every credential must come from process.env at runtime;
+# nothing secret belongs in a tracked file. These rules back that up mechanically
+# via the lefthook pre-commit hook and the CI workflow.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe matches verified by the 2026-09-20 history audit"
+
+paths = [
+  # Lockfile integrity hashes (sha512-... base64) trip generic high-entropy rules.
+  '''bun\.lock$''',
+  '''package-lock\.json$''',
+  # Binary branding assets: raw bytes look like entropy, contain no secrets.
+  '''^public/.*\.(png|ico|jpg|jpeg|webp)$''',
+  # Placeholder-only template. Guarded separately by scripts/validate-opencoven-port.mjs.
+  '''^\.env\.example$''',
+]
+
+regexes = [
+  # Documented placeholders, e.g. OPENAI_API_KEY=your_openai_api_key
+  '''your_[a-z0-9_]+''',
+  # Test fixtures use obvious fakes rather than real tokens.
+  '''github-test-token''',
+]

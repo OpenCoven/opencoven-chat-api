@@ -55,7 +55,9 @@ typings/
 .yarn-integrity
 
 # dotenv environment variables file
-.env*
+.env
+.env.*
+!.env.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -75,4 +77,23 @@ typings/
 # Serverless directories
 .serverless
 .vercel
-.DS_Store
+**/.DS_Store
+
+# Credentials, keys and certificates -- never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+id_rsa*
+id_ed25519*
+.npmrc
+.netrc
+*credentials*.json
+service-account*.json
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db

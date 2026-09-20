@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import { Embeddings } from "@/rag/embeddings";
 import { DocsStore } from "@/rag/store-upstash";
 import { Retriever } from "@/rag/retriever-upstash";
-import { checkRateLimit, getClientIp } from "@/rag/ratelimit";
+import { checkRateLimit } from "@/rag/ratelimit";
 import { classifyQuery, type ClassifiedQuery } from "@/rag/classifier";
 import { BM25Searcher, loadTermIndex } from "@/rag/bm25-searcher";
 import { reciprocalRankFusion, type FusedResult } from "@/rag/fusion";
@@ -27,47 +27,18 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_MESSAGE_LENGTH = 2000;
+const MAX_COMPLETION_TOKENS = 2048;
 const ENABLE_HYBRID = process.env.ENABLE_HYBRID_SEARCH === "true";
 const LOW_CONFIDENCE_THRESHOLD = 0.3;
 
-const DEFAULT_ALLOWED_ORIGINS = [
-  "https://docs.opencoven.ai",
-  "https://opencoven.ai",
-  "https://salem.opencoven.ai",
-];
-
-function allowedOrigins(): string[] {
-  const configured = process.env.ALLOWED_ORIGINS
-    ?.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  return configured?.length ? configured : DEFAULT_ALLOWED_ORIGINS;
-}
-
-function getCorsHeaders(request: Request) {
-  const origin = request.headers.get("Origin");
-  const allowedOrigin = origin && allowedOrigins().includes(origin) ? origin : "";
-
-  return {
-    "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Expose-Headers": "X-Query-Id, X-Best-Score, X-Threshold, X-Low-Confidence, X-Result-Count, X-Strategy, X-Intent, X-Retrieval-Ms, X-Rerank-Ms, X-Relevance-Rank",
-    "Vary": "Origin",
-  };
-}
-
-// Handle preflight requests
-export async function OPTIONS(request: NextRequest) {
-  return new Response(null, {
-    status: 204,
-    headers: getCorsHeaders(request),
-  });
-}
+// Salem is a first-party, session-only API: it serves its own UI and nothing
+// else. Cross-origin support was removed along with the Coven Cave client --
+// see the note in README. Cross-origin browser use was already impossible
+// (SameSite=Strict cookie, sameOrigin() rejecting cross-site, and no
+// Access-Control-Allow-Credentials), so there is no CORS surface to maintain.
+// sameOrigin() below remains the CSRF guard.
 
 function jsonResponse(
-  request: Request,
   data: object,
   status = 200,
   headers: Record<string, string> = {}
@@ -77,7 +48,7 @@ function jsonResponse(
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "private, no-store",
-      ...getCorsHeaders(request),
+      Vary: "Cookie",
       ...headers,
     },
   });
@@ -153,14 +124,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const user = await requestUser(request);
-    if (!user) return jsonResponse(request, { error: "Sign in required", status: 401 }, 401);
-    if (!sameOrigin(request)) return jsonResponse(request, { error: "Request origin is not allowed", status: 403 }, 403);
-    // Rate limiting
-    const headersObj: Record<string, string> = {};
-    request.headers.forEach((value, key) => {
-      headersObj[key] = value;
-    });
-    const rateLimitResult = await checkRateLimit(getClientIp(headersObj));
+    if (!user) return jsonResponse({ error: "Sign in required", status: 401 }, 401);
+    if (!sameOrigin(request)) return jsonResponse({ error: "Request origin is not allowed", status: 403 }, 403);
+    // Rate limiting. This route is authenticated, so key on the session user:
+    // a user ID is server-derived and cannot be rotated by the caller, unlike
+    // the x-forwarded-for value the IP helper reads.
+    const rateLimitResult = await checkRateLimit(`user:${user.id}`);
 
     const rateLimitHeaders: Record<string, string> = {};
     if (rateLimitResult) {
@@ -174,7 +143,6 @@ export async function POST(request: NextRequest) {
           (rateLimitResult.reset - Date.now()) / 1000
         ).toString();
         return jsonResponse(
-          request,
           { error: "Too many requests. Please try again later.", status: 429 },
           429,
           rateLimitHeaders
@@ -233,7 +201,6 @@ export async function POST(request: NextRequest) {
       }
     } catch {
       return jsonResponse(
-        request,
         { error: "Invalid JSON", status: 400 },
         400,
         rateLimitHeaders
@@ -242,7 +209,6 @@ export async function POST(request: NextRequest) {
 
     if (!message || typeof message !== "string") {
       return jsonResponse(
-        request,
         { error: "message required", status: 400 },
         400,
         rateLimitHeaders
@@ -252,7 +218,6 @@ export async function POST(request: NextRequest) {
     const trimmedMessage = message.trim();
     if (!trimmedMessage) {
       return jsonResponse(
-        request,
         { error: "message required", status: 400 },
         400,
         rateLimitHeaders
@@ -261,7 +226,6 @@ export async function POST(request: NextRequest) {
 
     if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
       return jsonResponse(
-        request,
         {
           error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`,
           status: 400,
@@ -275,7 +239,6 @@ export async function POST(request: NextRequest) {
     const openaiKey = process.env.OPENAI_API_KEY;
     if (!openaiKey) {
       return jsonResponse(
-        request,
         { error: "Server configuration error", status: 500 },
         500,
         rateLimitHeaders
@@ -284,12 +247,12 @@ export async function POST(request: NextRequest) {
 
     const historyStore = new ChatHistoryStore(new RedisStorage());
     const lock = await historyStore.lock(user.id);
-    if (!lock) return jsonResponse(request, { error: "A reply is already in progress. Wait for it to finish.", status: 409 }, 409);
+    if (!lock) return jsonResponse({ error: "A reply is already in progress. Wait for it to finish.", status: 409 }, 409);
     releaseLock = () => historyStore.unlock(user.id, lock);
     let conversation: SavedChat | null = null;
     if (chatId) {
       conversation = await historyStore.get(user.id, chatId);
-      if (!conversation) return jsonResponse(request, { error: "Chat not found", status: 404 }, 404);
+      if (!conversation) return jsonResponse({ error: "Chat not found", status: 404 }, 404);
     }
     // Only stored, account-scoped messages are accepted as conversation history.
     chatHistory = normalizeChatHistory(conversation?.messages);
@@ -334,7 +297,7 @@ export async function POST(request: NextRequest) {
 
       // Semantic search (for semantic and hybrid strategies)
       if (classified.strategy !== "keyword") {
-        semanticResults = await retriever.retrieve(classified.expanded, 20);
+        semanticResults = await retriever.retrieve(classified.expanded, 20, user.privateSources);
       }
 
       // Keyword search (for keyword and hybrid strategies)
@@ -378,7 +341,7 @@ export async function POST(request: NextRequest) {
           }));
         } else {
           // No semantic results, need to do a semantic search to get chunk data
-          const semanticFallback = await retriever.retrieve(classified.expanded, 20);
+          const semanticFallback = await retriever.retrieve(classified.expanded, 20, user.privateSources);
           semanticFallback.forEach(r => chunkMap.set(r.chunk.id, r.chunk));
           fusedResults = reciprocalRankFusion(
             semanticFallback,
@@ -433,7 +396,7 @@ export async function POST(request: NextRequest) {
       topScores = finalResults.map((r) => r.score);
     } else {
       // ===== LEGACY SEMANTIC-ONLY PIPELINE =====
-      const results = await retriever.retrieve(trimmedMessage, 8);
+      const results = await retriever.retrieve(trimmedMessage, 8, user.privateSources);
       retrievalMs = Date.now() - retrievalStart;
 
       finalResults = results.map((r) => ({
@@ -487,6 +450,9 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model,
           stream: true,
+          // Without this the completion length is unbounded. The stream reader
+          // caps the stored answer at 64k characters regardless (lib/chat-stream.ts).
+          max_completion_tokens: MAX_COMPLETION_TOKENS,
           messages: buildChatMessages({
             systemPrompt,
             history: chatHistory,
@@ -498,7 +464,6 @@ export async function POST(request: NextRequest) {
 
     if (!openaiResponse.ok || !openaiResponse.body) {
       return jsonResponse(
-        request,
         { error: `OpenAI API error: ${openaiResponse.status}`, status: 502 },
         502,
         rateLimitHeaders
@@ -520,8 +485,8 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "private, no-store",
+        Vary: "Cookie",
         "X-Chat-Id": savedConversation.id,
-        ...getCorsHeaders(request),
         ...rateLimitHeaders,
         "X-Query-Id": queryId,
         "X-Best-Score": bestScore.toFixed(4),
@@ -537,7 +502,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[Error]", error);
-    return jsonResponse(request, { error: "Unable to process this chat. Please try again.", status: 503 }, 503);
+    return jsonResponse({ error: "Unable to process this chat. Please try again.", status: 503 }, 503);
   } finally {
     if (releaseLock) await releaseLock();
   }

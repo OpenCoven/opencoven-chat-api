@@ -14,14 +14,14 @@
   "scripts": {
     "bdev": "next build && next dev",
     "dev": "next dev",
-    "dev:cave": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "test": "node scripts/validate-opencoven-port.mjs && bun scripts/embeddings.test.ts && bun scripts/private-research-sources.test.ts && bun scripts/typesafe-source.test.ts && bun scripts/reindex-freshness.test.ts && bun scripts/reindex-route.test.ts && bun scripts/chat-auth.test.ts && bun scripts/chat-route-auth.test.ts && bun scripts/chat-access.test.ts && bun scripts/session-history.test.ts && bun scripts/chat-stream.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/validate-opencoven-port.mjs && bun scripts/embeddings.test.ts && bun scripts/private-research-sources.test.ts && bun scripts/typesafe-source.test.ts && bun scripts/indexed-source-text.test.ts && bun scripts/reindex-freshness.test.ts && bun scripts/reindex-route.test.ts && bun scripts/chunk-visibility.test.ts && bun scripts/chat-auth.test.ts && bun scripts/chat-route-auth.test.ts && bun scripts/chat-access.test.ts && bun scripts/session-history.test.ts && bun scripts/chat-stream.test.ts",
     "build:index": "bun scripts/build-vector-index.ts",
     "deploy": "vercel",
-    "user:hash": "bun scripts/create-user.ts"
+    "user:hash": "bun scripts/create-user.ts",
+    "prepare": "lefthook install"
   },
   "dependencies": {
     "@create-markdown/core": "^2.0.0",
@@ -42,6 +42,7 @@
     "@types/node": "^22.19.15",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "lefthook": "^2.1.14",
     "typescript": "^5.9.3"
   },
   "patchedDependencies": {

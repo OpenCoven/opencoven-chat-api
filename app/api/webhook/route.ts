@@ -12,6 +12,13 @@ import { verifyGitHubSignature, isMainBranchPush } from "@/rag/indexer";
 import { reindexDocsIfChanged } from "@/rag/reindex-freshness";
 
 export const runtime = "nodejs";
+// A full rebuild measured ~44s on 2026-09-20; the 60s platform default leaves
+// no headroom for a webhook-triggered run.
+export const maxDuration = 300;
+
+// GitHub push payloads are well under this. The cap applies before signature
+// verification, which is the only work an unauthenticated caller can force here.
+const MAX_WEBHOOK_BODY_BYTES = 1_000_000;
 
 // Store indexing status (note: in edge runtime, this won't persist across invocations)
 let indexingStatus = {
@@ -30,12 +37,11 @@ let indexingStatus = {
  * GET /api/webhook - Status endpoint
  */
 export async function GET() {
+  // Liveness only. The previous response exposed indexing state, page and chunk
+  // counts, and indexer error strings to any anonymous caller.
   return NextResponse.json({
     status: "ok",
     webhook: "GitHub docs update webhook",
-    isIndexing: indexingStatus.isIndexing,
-    lastIndexed: indexingStatus.lastIndexed?.toISOString() || null,
-    lastResult: indexingStatus.lastResult,
   });
 }
 
@@ -54,8 +60,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Reject oversized payloads before reading or hashing them: verification
+  // happens after this point, so everything above it is unauthenticated work.
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (declaredLength > MAX_WEBHOOK_BODY_BYTES) {
+    return NextResponse.json({ error: "Payload too large", status: 413 }, { status: 413 });
+  }
+
   // Get raw body for signature verification
   const rawBody = await request.text();
+  if (rawBody.length > MAX_WEBHOOK_BODY_BYTES) {
+    return NextResponse.json({ error: "Payload too large", status: 413 }, { status: 413 });
+  }
   const signature = request.headers.get("X-Hub-Signature-256");
   const event = request.headers.get("X-GitHub-Event");
   const deliveryId = request.headers.get("X-GitHub-Delivery");

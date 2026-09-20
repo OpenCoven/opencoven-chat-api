@@ -5,7 +5,7 @@
  * Also builds BM25 inverted index for keyword search.
  */
 import { Embeddings } from "./embeddings";
-import { DocsStore, DocsChunk } from "./store-upstash";
+import { DocsStore, DocsChunk, visibilityForUrl } from "./store-upstash";
 import { buildTermIndex, storeTermIndex } from "./bm25-searcher";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
@@ -257,15 +257,50 @@ export async function fetchPrivateResearchDocs(): Promise<DocPage[]> {
   return pages;
 }
 
+function serializePage(page: DocPage): string {
+  return `# ${page.title}\nSource: ${page.url}\n\n${page.content}`;
+}
+
+/**
+ * Concatenates every source that indexDocs() will index, in a stable order.
+ *
+ * The reindex freshness guard hashes this string and skips the rebuild when the
+ * hash is unchanged, so anything indexed but absent here becomes permanently
+ * stale: the guard keeps reporting "unchanged" while the content drifts. It
+ * must therefore stay in step with indexDocs().
+ *
+ * Coven Code is fetched best-effort, matching indexDocs(). If that fetch fails
+ * the section is omitted, which changes the hash and triggers a rebuild -- the
+ * safe direction to fail, since an unnecessary reindex is recoverable and a
+ * missed one is silent.
+ */
 export async function fetchIndexedSourceText(): Promise<string> {
-  const parts = await Promise.all([
+  const [openCovenText, typeSafeText, covenCodePages] = await Promise.all([
     fetchLlmsFullText(),
     fetchLlmsFullText(TYPESAFE_LLMS_FULL_URL),
+    fetchCovenCodeDocs().catch((error) => {
+      console.warn(
+        `Coven Code docs unavailable while hashing sources; a rebuild will be triggered: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [] as DocPage[];
+    }),
   ]);
-  const privateResearchPages = await fetchPrivateResearchDocs();
 
-  for (const page of privateResearchPages) {
-    parts.push(`# ${page.title}\nSource: ${page.url}\n\n${page.content}`);
+  const parts = [openCovenText, typeSafeText];
+
+  for (const page of covenCodePages) {
+    parts.push(serializePage(page));
+  }
+
+  // Local ./docs/*.md are indexed too, so an edit there must invalidate the hash.
+  for (const page of loadSupplementaryDocs()) {
+    parts.push(serializePage(page));
+  }
+
+  for (const page of await fetchPrivateResearchDocs()) {
+    parts.push(serializePage(page));
   }
 
   return parts.join("\n\n---\n\n");
@@ -344,6 +379,29 @@ async function fetchCovenCodeDocs(): Promise<DocPage[]> {
  * Loads supplementary knowledge base files from the local docs/ directory.
  * Files use the same format as llms-full.txt (# Title / Source: URL / content).
  */
+/**
+ * Marks local documentation that must never be indexed as public.
+ *
+ * Supplementary pages take their citation URL from a `Source:` line inside the
+ * file, which means anything dropped into ./docs/ is published under whatever
+ * public URL it names -- the `private://` visibility gate never sees it. There
+ * is no way to infer sensitivity from content, so this is an explicit opt-out:
+ * name the file `private-*.md` or add `private: true` frontmatter and indexing
+ * fails loudly instead of quietly publishing it.
+ */
+function assertNotPrivateSupplementaryDoc(file: string, content: string): void {
+  const byName = /^private[-.]/i.test(file);
+  const byFrontmatter = /^---\r?\n(?:.*\r?\n)*?\s*private:\s*true\s*(?:\r?\n|$)/im.test(content);
+
+  if (byName || byFrontmatter) {
+    throw new Error(
+      `Refusing to index ${file}: it is marked private but supplementary docs are ` +
+        `indexed as public. Move it to a private research source ` +
+        `(SALEM_PRIVATE_RESEARCH_* ) so it is stored behind the private:// gate.`,
+    );
+  }
+}
+
 function loadSupplementaryDocs(): DocPage[] {
   const pages: DocPage[] = [];
 
@@ -356,6 +414,7 @@ function loadSupplementaryDocs(): DocPage[] {
 
   for (const file of files) {
     const content = readFileSync(join(SUPPLEMENTARY_DIR, file), "utf-8");
+    assertNotPrivateSupplementaryDoc(file, content);
     const sections = content.split(/\n(?=# [^\n]+\nSource:)/);
 
     for (const section of sections) {
@@ -423,6 +482,7 @@ async function chunkContent(
       id: await generateChunkId(page.url, 0),
       path: page.path,
       title: page.title,
+      visibility: visibilityForUrl(page.url),
       content: content,
       url: page.url,
       vector: [], // Will be filled by embeddings
@@ -456,6 +516,7 @@ async function chunkContent(
         id: await generateChunkId(page.url, chunkIndex),
         path: page.path,
         title: `${page.title}${chunkIndex > 0 ? ` (Part ${chunkIndex + 1})` : ""}`,
+        visibility: visibilityForUrl(page.url),
         content: chunkText,
         url: page.url,
         vector: [],

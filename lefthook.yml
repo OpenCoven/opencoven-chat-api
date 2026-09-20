@@ -1,0 +1,48 @@
+# Pre-commit enforcement for a PUBLIC repository.
+#
+# Every credential in this project comes from process.env at runtime. These hooks
+# make that a mechanical guarantee rather than a matter of discipline.
+#
+# Installed automatically by the `prepare` script on `bun install`.
+# To install by hand:  bunx lefthook install
+#
+# A local hook can always be bypassed with `git commit --no-verify`, so the same
+# checks run again in .github/workflows/ci.yml, where they cannot be skipped.
+
+pre-commit:
+  parallel: true
+  commands:
+    secrets:
+      # Scans the staged patch only -- fast, and catches a secret before it
+      # ever reaches an object in .git.
+      run: gitleaks git --staged --redact --no-banner --config .gitleaks.toml
+      fail_text: |
+        gitleaks found a possible secret in your staged changes.
+        Nothing was committed. Unstage it, move the value into .env (gitignored),
+        and reference it via process.env. If this is a false positive, add a
+        narrowly-scoped entry to [allowlist] in .gitleaks.toml.
+
+    forbidden-files:
+      # Defence in depth: .gitignore already covers these, but `git add -f`
+      # overrides .gitignore and this check does not.
+      glob: "*"
+      run: |
+        blocked=$(printf '%s\n' {staged_files} | grep -Ei \
+          '(^|/)\.env($|\.)|\.(pem|key|p12|pfx|cer|crt)$|(^|/)id_(rsa|ed25519)|(^|/)\.(npmrc|netrc)$|credentials.*\.json$|service-account.*\.json$' \
+          | grep -v '^\.env\.example$' || true)
+        if [ -n "$blocked" ]; then
+          echo "Refusing to commit credential-bearing paths:"
+          echo "$blocked" | sed 's/^/  /'
+          exit 1
+        fi
+
+    typecheck:
+      # tsc is the real static gate here: `next lint` was removed in Next 16 and
+      # eslint is not a dependency of this project.
+      glob: "*.{ts,tsx}"
+      run: bun run typecheck
+
+pre-push:
+  commands:
+    tests:
+      run: bun run test
