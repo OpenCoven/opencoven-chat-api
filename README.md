@@ -65,6 +65,17 @@ Chats from before this feature cannot be recovered because they were not stored.
 
 ## API Endpoints
 
+Salem is a **first-party, session-only API**: it serves its own UI and no other
+client. There is no CORS allowlist and no preflight handler, because there is no
+supported cross-origin caller. `/api/chat`, `/api/chats` and `/api/chats/[id]`
+require a `salem_session` cookie and reject cross-site requests outright.
+
+Support for the Coven Cave client (which proxied to `SALEM_CHAT_API_URL`) was
+removed. Integrating an external client again would need a deliberate
+server-to-server auth path — a bearer token or service credential — rather than
+the browser session cookie, which is `SameSite=Strict` and cannot be forwarded
+by a proxy.
+
 | Endpoint              | Method | Description                               |
 | --------------------- | ------ | ----------------------------------------- |
 | `/api/session`        | POST / GET / DELETE | Sign in, inspect session, or sign out |
@@ -146,7 +157,6 @@ cp .env.example .env
 | `SALEM_PRIVATE_RESEARCH_REF` | No | Git ref for private research sources, defaults to `main` |
 | `SALEM_PRIVATE_RESEARCH_PATHS` | No | Comma-separated private research markdown paths |
 | `SALEM_PRIVATE_RESEARCH_GITHUB_TOKEN` | No | Server-only token for private GitHub research fetches |
-| `ALLOWED_ORIGINS`           | No       | Comma-separated CORS allowlist                   |
 
 Authentication variables are server-only. Never expose them through `PUBLIC_` or `NEXT_PUBLIC_` variables. Without a configured admin or approved user list, the interface stays locked.
 
@@ -180,7 +190,6 @@ Runs locally at http://localhost:3000.
 | Script                | Description                           |
 | --------------------- | ------------------------------------- |
 | `bun run dev`         | Start development server (port 3000)  |
-| `bun run dev:cave`    | Start development server on port 3001 |
 | `bun run build`       | Build for production                  |
 | `bun run start`       | Start production server               |
 | `bun run typecheck`   | Type-check with `tsc --noEmit`        |
