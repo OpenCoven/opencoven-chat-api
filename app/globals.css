@@ -691,8 +691,9 @@ footer {
   font-size: 0.85rem;
   line-height: 1.6;
 }
-.sign-in-form { max-width: 420px; }
+.sign-in-form { width: 100%; }
 .sign-in-form .password-field { max-width: none; }
+.sign-in-form .chat-input { width: 100%; min-width: 0; box-sizing: border-box; }
 .sign-in-form .chat-btn { justify-content: center; }
 .account-toolbar, .recent-chats-header {
   display: flex;
