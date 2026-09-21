@@ -28,6 +28,7 @@ Authorized deployments can also index private OpenCoven research from server-onl
 ## Access and recent chats
 
 Salem requires sign-in before showing the chat interface or accepting any question.
+The sign-in form asks only for a password and signs in to the default account.
 `SALEM_ADMIN_PASSWORD` signs in to the `admin` account (override its username with
 `SALEM_ADMIN_USERNAME`). The former public first-question access and
 `X-Salem-Admin-Password` API header are no longer supported.
@@ -134,7 +135,9 @@ by a proxy.
 
 ### POST /api/chat
 
-First sign in through `/api/session` with `{ "username": "admin", "password": "..." }`
+First sign in through `/api/session` with `{ "password": "..." }` (the username
+defaults to the admin account, or to the only `SALEM_USERS_JSON` entry when no admin
+is configured; pass `"username"` to pick another account)
 and retain the session cookie. Send `chatId` to continue a saved conversation;
 omit it to start a new one. The API returns the ID in `X-Chat-Id` and loads prior
 messages from storage. Caller-supplied user IDs and message history are ignored.

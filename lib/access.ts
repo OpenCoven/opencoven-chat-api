@@ -147,6 +147,19 @@ function accounts(): Account[] {
   return users;
 }
 export function accessConfigured(): boolean { return accounts().length > 0; }
+/**
+ * Account a sign-in resolves to when the request carries no username. The
+ * sign-in form is password-only: the deployment is expected to have a single
+ * account, so asking for a name it cannot vary is noise. The admin account
+ * wins when configured; otherwise a lone `SALEM_USERS_JSON` entry. With
+ * several named users and no admin there is no sensible default, and the
+ * caller must name the account.
+ */
+export function defaultUsername(): string | null {
+  const all = accounts();
+  if (process.env.SALEM_ADMIN_PASSWORD) return process.env.SALEM_ADMIN_USERNAME || "admin";
+  return all.length === 1 ? all[0].id : null;
+}
 function publicUser(account: Account): SalemUser {
   return { id: account.id, name: account.name, privateSources: account.privateSources };
 }
