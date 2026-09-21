@@ -54,6 +54,13 @@ try {
   assert.equal((await chat.GET(request("/api/chats/id"), { params: Promise.resolve({ id: "id" }) })).status, 401);
   assert.equal((await session.POST(request("/api/session", "POST", { username: "admin", password: "admin-password" }, undefined, "https://attacker.example"))).status, 403);
   assert.equal((await session.POST(request("/api/session", "POST", { username: "alice", password: "wrong" }))).status, 401);
+  // Password-only sign-in resolves to the admin account, and only that account:
+  // another user's password is not matched by scanning every account.
+  const passwordOnly = await session.POST(request("/api/session", "POST", { password: "admin-password" }));
+  assert.equal(passwordOnly.status, 200);
+  assert.equal((await passwordOnly.json()).user.id, "admin");
+  assert.equal((await session.POST(request("/api/session", "POST", { password: "alice-password-123" }))).status, 401);
+  assert.equal((await session.POST(request("/api/session", "POST", { username: "alice" }))).status, 400);
   assert.equal(modelCalls, 0);
 
   const alice = await signIn("alice", "alice-password-123");

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { AccessService, accessConfigured, digest, SESSION_COOKIE } from "@/lib/access";
+import { AccessService, accessConfigured, defaultUsername, digest, SESSION_COOKIE } from "@/lib/access";
 import { RedisStorage } from "@/lib/storage";
 import { privateJson, requestUser, sameOrigin, setSessionCookie } from "@/lib/session-http";
 import { getClientIp } from "@/rag/ratelimit";
@@ -23,10 +23,13 @@ export async function POST(request: NextRequest) {
     if (raw.length > 4096) return privateJson({ error: "Invalid sign-in request" }, 400);
     let body;
     try { body = JSON.parse(raw); } catch { return privateJson({ error: "Invalid sign-in request" }, 400); }
-    if (typeof body?.username !== "string" || typeof body?.password !== "string") return privateJson({ error: "Username and password are required" }, 400);
+    if (typeof body?.password !== "string") return privateJson({ error: "Password is required" }, 400);
+    // The form is password-only; an omitted username means the default account.
+    const username = body.username === undefined ? defaultUsername() : body.username;
+    if (typeof username !== "string") return privateJson({ error: "Username and password are required" }, 400);
     const access = new AccessService(store);
-    const session = await access.login(body.username, body.password);
-    if (!session) return privateJson({ error: "Username or password is incorrect" }, 401);
+    const session = await access.login(username, body.password);
+    if (!session) return privateJson({ error: "Password is incorrect" }, 401);
     // Revoke the previous browser session when switching accounts.
     await access.logout(request.cookies.get(SESSION_COOKIE)?.value);
     const response = privateJson({ user: session.user });
