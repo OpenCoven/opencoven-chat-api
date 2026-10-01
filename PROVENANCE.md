@@ -15,7 +15,7 @@
 - License: MIT (https://opensource.org/licenses/MIT)
 - Repository creation date: **2026-04-27** (verifiable via GitHub API: `https://api.github.com/repos/OpenCoven/coven`)
 
-This repository has no fork parent. It is an original work with no upstream source repository.
+This repository is a GitHub fork of [OpenKnots/openclaw-chat-api](https://github.com/OpenKnots/openclaw-chat-api), which is MIT licensed. It is a derivative of that upstream repository, not an original work. The architectural concepts listed below originated in `OpenCoven/coven`, not in this repository.
 
 ---
 
